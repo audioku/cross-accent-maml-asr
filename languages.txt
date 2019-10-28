@@ -1,0 +1,20 @@
+bg = Bulgarian (Slavic, Cyrillic)
+ca = Catalan (Romance, Latin)
++ de = German (Germanic, Latin)
+el = Modern Greek (Greek/Helenic, Greek)
+en = English (Germanic, Latin)
+(not good) es = Spanish (Romance, Latin)
+fa = Persian (Persian, Persian)
++ fr = French
+(no encoding) he = Hebrew (*)
+(not good?) # hr = Croatian (Slavic, Latin)
++ it = Italian
++ nl = Dutch
++ pt = Portugese
++ ru = Russian
+# sq = Albanian (Albanian, Latin/Albanian Alphabet)
+# tr = Turkish (Turkic, Latin/Turkish Alphabet)
+# uk = Ukranian (Slavic, Cyrillic)
+
+empty:
+zh = Chinese (*)

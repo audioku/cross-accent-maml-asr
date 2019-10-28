@@ -1,0 +1,51 @@
+HKUST
+
+TRAIN
+taskset -c 0,1,2 python3 train.py --train-manifest-list data/manifests/hkust_test_manifest.csv --valid-manifest-list data/manifests/hkust_test_small_manifest.csv --cuda --batch-size 32 --labels-path data/labels/hkust_labels.json --lr 1e-4 --name test --save-folder save/ --save-every 2 --feat_extractor vgg_cnn --dropout 0.1 --num-enc-layers 2 --num-dec-layers 4 --num-heads 8 --dim-model 512 --dim-key 64  --dim-value 64  --dim-input 5120 --dim-inner 2048 --dim-emb 512 --shuffle --min-lr 0 --k-lr 1 --train-lang-list zh --valid-lang-list zh --trg-label-list data/labels/hkust_labels.json  --early-stop cer,200 --combine_decoder --input_type char --clip --sample-rate 8000 --is-factorized --r 50
+
+CPU VALID
+taskset -c 0,1,2 python3 test.py --test-manifest-list data/manifests/hkust_test_small_manifest.csv --batch-size 32 --labels-path data/labels/hkust_labels.json --lr 1e-4 --name hkust_r_50 --save-folder save/ --save-every 2 --feat_extractor vgg_cnn --dropout 0.1 --num-enc-layers 2 --num-dec-layers 4 --num-heads 8 --dim-model 512 --dim-key 64  --dim-value 64  --dim-input 5120 --dim-inner 2048 --dim-emb 512 --shuffle --min-lr 0 --k-lr 1 --test-lang-list zh --trg-label-list data/labels/hkust_labels.json  --early-stop cer,200 --combine_decoder --input_type char --clip --sample-rate 8000 --is-factorized --r 50 --continue-from save/hkust_r_50/best_model.th --verbose
+TEST CER:36.29% WER:53.64% CER_EN:33.33% CER_ZH:38.32% TOTAL_TIME:1080.0600452 DIFF_TIME_PER_WORD:0.57
+
+GPU VALID
+taskset -c 0,1,2 python3 test.py --test-manifest-list data/manifests/hkust_test_small_manifest.csv --cuda --batch-size 32 --labels-path data/labels/hkust_labels.json --lr 1e-4 --name hkust_r_50 --save-folder save/ --save-every 2 --feat_extractor vgg_cnn --dropout 0.1 --num-enc-layers 2 --num-dec-layers 4 --num-heads 8 --dim-model 512 --dim-key 64  --dim-value 64  --dim-input 5120 --dim-inner 2048 --dim-emb 512 --shuffle --min-lr 0 --k-lr 1 --test-lang-list zh --trg-label-list data/labels/hkust_labels.json  --early-stop cer,200 --combine_decoder --input_type char --clip --sample-rate 8000 --is-factorized --r 50 --continue-from save/hkust_r_50/best_model.th --verbose
+TEST CER:36.29% WER:53.64% CER_EN:33.33% CER_ZH:38.32% DIFF_TIME:2.85 DIFF_TIME_PER_WORD:0.04: 100%|█| 7/7 [01:07<00:00,  8.47s/it]
+67
+1.35
+
+r_75
+TEST CER:34.59% WER:51.70% CER_EN:66.67% CER_ZH:36.48% DIFF_TIME:3.05 DIFF_TIME_PER_WORD:0.04: 100%|█| 7/7 [01:08<00:00,  8.68s/it]
+68
+1.26x
+
+r_100
+TEST CER:31.86% WER:48.51% CER_EN:33.33% CER_ZH:33.63% DIFF_TIME:3.19 DIFF_TIME_PER_WORD:0.04: 100%|█| 7/7 [01:11<00:00,  9.09s/it]
+71
+1.21x
+
+baseline
+TEST CER:34.09% WER:51.65% CER_EN:66.67% CER_ZH:35.97% DIFF_TIME:3.85 DIFF_TIME_PER_WORD:0.05: 100%|█| 7/7 [01:26<00:00, 10.86s/it]
+86
+
+
+
+AiSHELL
+taskset -c 0,1,2 python3 test.py --test-manifest-list data/manifests/aishell_test_small_manifest.csv --cuda --batch-size 20 --labels-path data/labels/aishell_labels.json --lr 1e-4 --name Aishell --save-folder save/ --save-every 2 --feat_extractor vgg_cnn --dropout 0.1 --num-enc-layers 2 --num-dec-layers 4 --num-heads 8 --dim-model 512 --dim-key 64  --dim-value 64  --dim-input 5120 --dim-inner 2048 --dim-emb 512 --shuffle --min-lr 0 --k-lr 1 --test-lang-list zh --trg-label-list data/labels/aishell_labels.json  --early-stop cer,200 --combine_decoder --input_type char --clip --continue-from save/Aishell/best_model.th  --verbose
+
+r_50
+TEST CER:9.42% WER:17.27% CER_EN:0.00% CER_ZH:9.85% DIFF_TIME:6.82 DIFF_TIME_PER_WORD:0.03: 100%|█| 10/10 [01:03<00:00,  6.57s/it]
+63
+1.30x
+
+r_75
+TEST CER:7.86% WER:14.75% CER_EN:0.00% CER_ZH:8.22% DIFF_TIME:7.24 DIFF_TIME_PER_WORD:0.04: 100%|█| 10/10 [01:07<00:00,  7.02s/it]
+67
+1.23x
+
+r_100
+TEST CER:8.75% WER:16.06% CER_EN:0.00% CER_ZH:9.15% DIFF_TIME:7.57 DIFF_TIME_PER_WORD:0.04: 100%|█| 10/10 [01:09<00:00,  7.30s/it]
+1.17x
+
+baseline
+TEST CER:8.62% WER:17.22% CER_EN:0.00% CER_ZH:9.01% DIFF_TIME:8.89 DIFF_TIME_PER_WORD:0.04: 100%|█| 10/10 [01:24<00:00,  8.74s/it]
+84
