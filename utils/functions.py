@@ -7,7 +7,6 @@ import numpy as np
 
 from models.asr.transformer import Transformer, Encoder, Decoder
 from utils.optimizer import NoamOpt, AnnealingOpt
-from utils.parallel import DataParallel
 
 def generate_labels(labels, special_token_list):
     # add PAD_CHAR, SOS_CHAR, EOS_CHAR, UNK_CHAR
@@ -181,12 +180,12 @@ def init_transformer_model(args, vocab, train=True, is_factorized=False, r=100):
     decoder = decoder if train else decoder
     model = Transformer(encoder, decoder, feat_extractor=feat_extractor, train=train)
 
-    if args.parallel:
-        device_ids = args.device_ids
-        if args.device_ids:
-            print("load with device_ids", args.device_ids)
-            model = DataParallel(model, device_ids=args.device_ids)
-        else:
-            model = DataParallel(model)
-
     return model
+
+def post_process(string, vocab):
+    special_token_list = vocab.special_token_list
+    for i in range(len(special_token_list)):
+        if special_token_list[i] != vocab.PAD_TOKEN:
+            string = string.replace(special_token_list[i],"")
+    string = string.replace("▁"," ")
+    return string

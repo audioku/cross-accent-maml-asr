@@ -1,15 +1,15 @@
 import time
 import numpy as np
+import torch
+import logging
+import sys
+
 from tqdm import tqdm
 from utils import constant
-from utils.functions import save_model
+from utils.functions import save_model, post_process
 from utils.optimizer import NoamOpt
 from utils.metrics import calculate_metrics, calculate_cer, calculate_wer
 from torch.autograd import Variable
-import torch
-import logging
-
-import sys
 
 class Trainer():
     """
@@ -18,30 +18,21 @@ class Trainer():
     def __init__(self):
         logging.info("Trainer is initialized")
 
-    def post_process(self, string, special_token_list):
-        for i in range(len(special_token_list)):
-            if special_token_list[i] != constant.PAD_TOKEN:
-                string = string.replace(special_token_list[i],"")
-        string = string.replace("▁"," ")
-        return string
-
-    def train_one_batch(self, model, src, trg, trg_transcript, src_percentages, src_lengths, trg_lengths, langs, lang_names, special_token_list, trg_id2labels, smoothing, loss_type):
-        pred, gold, hyp = model(src, src_lengths, trg, trg_transcript, langs, lang_names, verbose=False)
+    def train_one_batch(self, model, vocab, src, trg, trg_transcript, src_percentages, src_lengths, trg_lengths, smoothing, loss_type):
+        pred, gold, hyp = model(src, src_lengths, trg, trg_transcript, verbose=False)
         strs_golds, strs_hyps = [], []
 
         for lang_id in range(len(gold)):
             gold_seq = gold[lang_id]
             for j in range(len(gold_seq)):
                 ut_gold = gold_seq[j]
-                if len(trg_id2labels) == 1: lang_id = 0
-                strs_golds.append("".join([trg_id2labels[lang_id][int(x)] for x in ut_gold]))
+                strs_golds.append("".join([vocab.id2label[int(x)] for x in ut_gold]))
         
         for lang_id in range(len(hyp)):
             hyp_seq = hyp[lang_id]
             for j in range(len(hyp_seq)):
                 ut_hyp = hyp_seq[j]
-                if len(trg_id2labels) == 1: lang_id = 0
-                strs_hyps.append("".join([trg_id2labels[lang_id][int(x)] for x in ut_hyp]))
+                strs_hyps.append("".join([vocab.id2label[int(x)] for x in ut_hyp]))
 
         # handling the last batch
         for j in range(len(pred)):
@@ -69,8 +60,8 @@ class Trainer():
 
         total_cer, total_wer, total_char, total_word = 0, 0, 0, 0
         for j in range(len(strs_hyps)):
-            strs_hyps[j] = self.post_process(strs_hyps[j], special_token_list)
-            strs_golds[j] = self.post_process(strs_golds[j], special_token_list)
+            strs_hyps[j] = post_process(strs_hyps[j], vocab)
+            strs_golds[j] = post_process(strs_golds[j], vocab)
             cer = calculate_cer(strs_hyps[j].replace(' ', ''), strs_golds[j].replace(' ', ''))
             wer = calculate_wer(strs_hyps[j], strs_golds[j])
             total_cer += cer
@@ -80,7 +71,7 @@ class Trainer():
 
         return loss, total_cer, total_char
 
-    def train(self, model, vocab, train_loader, train_sampler, valid_loader_list, opt, loss_type, start_epoch, num_epochs, last_metrics=None, early_stop=10, is_accu_loss=False):
+    def train(self, model, vocab, train_loader, train_sampler, valid_loader_list, opt, loss_type, start_epoch, num_epochs, args, last_metrics=None, early_stop=10):
         """
         Training
         args:
@@ -94,11 +85,11 @@ class Trainer():
         """
         history = []
         best_valid_val = 1000000000
-        smoothing = constant.args.label_smoothing
+        smoothing = args.label_smoothing
         early_stop_criteria, early_stop_val = early_stop.split(",")[0], int(early_stop.split(",")[1])
         count_stop = 0
 
-        logging.info("name " +  constant.args.name)
+        logging.info("name " +  args.name)
 
         for epoch in range(start_epoch, num_epochs):
             total_loss, total_cer, total_wer, total_char, total_word = 0, 0, 0, 0, 0
@@ -115,26 +106,25 @@ class Trainer():
             max_len = 0
             for i, (data) in enumerate(pbar, start=start_iter):
                 torch.cuda.empty_cache()
-                src, trg, trg_transcript, src_percentages, src_lengths, trg_lengths, langs, lang_names = data
+                src, trg, trg_transcript, src_percentages, src_lengths, trg_lengths = data
                 max_len = max(max_len, src.size(-1))
 
                 opt.zero_grad()
 
                 try:
-                    if constant.USE_CUDA:
+                    if USE_CUDA:
                         src = src.cuda()
                         trg = trg.cuda()
                         trg_transcript = trg_transcript.cuda()
-                        langs = langs.cuda()
 
                     start_time = time.time()
-                    loss, cer, num_char = self.train_one_batch(model, src, trg, trg_transcript, src_percentages, src_lengths, trg_lengths, langs, lang_names, special_token_list, trg_id2labels, smoothing, loss_type)
+                    loss, cer, num_char = self.train_one_batch(model, vocab, src, trg, trg_transcript, src_percentages, src_lengths, trg_lengths, smoothing, loss_type)
                     total_cer += cer
                     total_char += num_char
                     loss.backward()
 
-                    if constant.args.clip:
-                        torch.nn.utils.clip_grad_norm_(model.parameters(), constant.args.max_norm)
+                    if args.clip:
+                        torch.nn.utils.clip_grad_norm_(model.parameters(), args.max_norm)
                     
                     opt.step()
                     total_loss += loss.item()
@@ -151,25 +141,25 @@ class Trainer():
                         torch.cuda.empty_cache()
                         src = src.cpu()
                         trg = trg.cpu()
-                        src_splits, src_lengths_splits, trg_lengths_splits, trg_splits, trg_transcript_splits, src_percentages_splits, langs_splits = iter(src.split(2, dim=0)), iter(src_lengths.split(2, dim=0)), iter(trg_lengths.split(2, dim=0)), iter(trg.split(2, dim=0)), iter(trg_transcript.split(2, dim=0)), iter(src_percentages.split(2, dim=0)), iter(langs.split(2, dim=0))
+                        src_splits, src_lengths_splits, trg_lengths_splits, trg_splits, trg_transcript_splits, src_percentages_splits = iter(src.split(2, dim=0)), iter(src_lengths.split(2, dim=0)), iter(trg_lengths.split(2, dim=0)), iter(trg.split(2, dim=0)), iter(trg_transcript.split(2, dim=0)), iter(src_percentages.split(2, dim=0))
                         j = 0
 
                         start_time = time.time()
-                        for src, trg, src_lengths, trg_lengths, trg_transcript, src_percentages, langs in zip(src_splits, trg_splits, src_lengths_splits, trg_lengths_splits, trg_transcript_splits, src_percentages_splits, langs_splits):
+                        for src, trg, src_lengths, trg_lengths, trg_transcript, src_percentages in zip(src_splits, trg_splits, src_lengths_splits, trg_lengths_splits, trg_transcript_splits, src_percentages_splits):
                             opt.zero_grad()
                             torch.cuda.empty_cache()
-                            if constant.USE_CUDA:
+                            if USE_CUDA:
                                 src = src.cuda()
                                 trg = trg.cuda()
 
                             start_time = time.time()
-                            loss, cer, num_char = self.train_one_batch(model, src, trg, trg_transcript, src_percentages, src_lengths, trg_lengths, langs, lang_names[j*2:j*2+2], special_token_list, trg_id2labels, smoothing, loss_type)
+                            loss, cer, num_char = self.train_one_batch(model, vocab, src, trg, trg_transcript, src_percentages, src_lengths, trg_lengths, smoothing, loss_type)
                             total_cer += cer
                             total_char += num_char
                             loss.backward()
 
-                            if constant.args.clip:
-                                torch.nn.utils.clip_grad_norm_(model.parameters(), constant.args.max_norm)
+                            if args.clip:
+                                torch.nn.utils.clip_grad_norm_(model.parameters(), args.max_norm)
                             
                             opt.step()
                             total_loss += loss.item()
@@ -211,14 +201,13 @@ class Trainer():
                 for i, (data) in enumerate(valid_pbar):
                     torch.cuda.empty_cache()
 
-                    src, trg, trg_transcript, src_percentages, src_lengths, trg_lengths, langs, lang_names = data
+                    src, trg, trg_transcript, src_percentages, src_lengths, trg_lengths = data
                     try:
-                        if constant.USE_CUDA:
+                        if USE_CUDA:
                             src = src.cuda()
                             trg = trg.cuda()
                             trg_transcript = trg_transcript.cuda()
-                            langs = langs.cuda()
-                        loss, cer, num_char = self.train_one_batch(model, src, trg, trg_transcript, src_percentages, src_lengths, trg_lengths, langs, lang_names, special_token_list, trg_id2labels, smoothing, loss_type)
+                        loss, cer, num_char = self.train_one_batch(model, vocab, src, trg, trg_transcript, src_percentages, src_lengths, trg_lengths, smoothing, loss_type)
                         total_valid_cer += cer
                         total_valid_char += num_char
 
@@ -232,21 +221,21 @@ class Trainer():
                             torch.cuda.empty_cache()
                             src = src.cpu()
                             trg = trg.cpu()
-                            src_splits, src_lengths_splits, trg_lengths_splits, trg_splits, trg_transcript_splits, src_percentages_splits, langs_splits = iter(src.split(2, dim=0)), iter(src_lengths.split(2, dim=0)), iter(trg_lengths.split(2, dim=0)), iter(trg.split(2, dim=0)), iter(trg_transcript.split(2, dim=0)), iter(src_percentages.split(2, dim=0)), iter(langs.split(2, dim=0))
+                            src_splits, src_lengths_splits, trg_lengths_splits, trg_splits, trg_transcript_splits, src_percentages_splits = iter(src.split(2, dim=0)), iter(src_lengths.split(2, dim=0)), iter(trg_lengths.split(2, dim=0)), iter(trg.split(2, dim=0)), iter(trg_transcript.split(2, dim=0)), iter(src_percentages.split(2, dim=0))
                             j = 0
-                            for src, trg, src_lengths, trg_lengths, trg_transcript, src_percentages, langs in zip(src_splits, trg_splits, src_lengths_splits, trg_lengths_splits, trg_transcript_splits, src_percentages_splits, langs_splits):
+                            for src, trg, src_lengths, trg_lengths, trg_transcript, src_percentages in zip(src_splits, trg_splits, src_lengths_splits, trg_lengths_splits, trg_transcript_splits, src_percentages_splits):
                                 opt.zero_grad()
                                 torch.cuda.empty_cache()
-                                if constant.USE_CUDA:
+                                if USE_CUDA:
                                     src = src.cuda()
                                     trg = trg.cuda()
 
-                                loss, cer, num_char = self.train_one_batch(model, src, trg, trg_transcript, src_percentages, src_lengths, trg_lengths, langs, lang_names[j*2:j*2+2], special_token_list, trg_id2labels, smoothing, loss_type)
+                                loss, cer, num_char = self.train_one_batch(model, vocab, src, trg, trg_transcript, src_percentages, src_lengths, trg_lengths, smoothing, loss_type)
                                 total_valid_cer += cer
                                 total_valid_char += num_char
 
-                                if constant.args.clip:
-                                    torch.nn.utils.clip_grad_norm_(model.parameters(), constant.args.max_norm)
+                                if args.clip:
+                                    torch.nn.utils.clip_grad_norm_(model.parameters(), args.max_norm)
                                 
                                 total_valid_loss += loss.item()
                                 j += 1
@@ -284,8 +273,8 @@ class Trainer():
             print("AVG VALID LOSS:{:.4f} AVG CER:{:.2f}%".format(sum(final_valid_losses) / len(final_valid_losses), sum(final_valid_cers) / len(final_valid_cers)))
             logging.info("AVG VALID LOSS:{:.4f} AVG CER:{:.2f}%".format(sum(final_valid_losses) / len(final_valid_losses), sum(final_valid_cers) / len(final_valid_cers)))
 
-            if epoch % constant.args.save_every == 0:
-                save_model(model, vocab, (epoch+1), opt, metrics, best_model=False)
+            if epoch % args.save_every == 0:
+                save_model(model, vocab, (epoch+1), opt, metrics, args, best_model=False)
 
             # save the best model
             early_stop_criteria, early_stop_val
@@ -294,7 +283,7 @@ class Trainer():
                 if best_valid_val > avg_valid_cer:
                     count_stop = 0
                     best_valid_val = avg_valid_cer
-                    save_model(model, vocab, (epoch+1), opt, metrics, best_model=True)
+                    save_model(model, vocab, (epoch+1), opt, metrics, args, best_model=True)
                 else:
                     print("count_stop:", count_stop)
                     count_stop += 1
@@ -303,7 +292,7 @@ class Trainer():
                 if best_valid_val > avg_valid_loss:
                     count_stop = 0
                     best_valid_val = avg_valid_loss
-                    save_model(model, vocab, (epoch+1), opt, metrics, best_model=True)
+                    save_model(model, vocab, (epoch+1), opt, metrics, args, best_model=True)
                 else:
                     count_stop += 1
                     print("count_stop:", count_stop)
@@ -313,7 +302,7 @@ class Trainer():
                 print("EARLY STOP\n")
                 break
 
-            if constant.args.shuffle:
+            if args.shuffle:
                 logging.info("SHUFFLE")
                 print("SHUFFLE\n")
                 train_sampler.shuffle(epoch)
