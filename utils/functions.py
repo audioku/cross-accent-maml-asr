@@ -3,39 +3,62 @@ import os
 import math
 import torch.nn as nn
 import logging
+import numpy as np
 
-from models.asr.las import LAS, LASEncoder, LASDecoder
-from models.asr.deepspeech import DeepSpeech
 from models.asr.transformer import Transformer, Encoder, Decoder
-from models.lm.transformer_lm import TransformerLM
 from utils.optimizer import NoamOpt, AnnealingOpt
-from utils import constant
 from utils.parallel import DataParallel
 
+def generate_labels(labels, special_token_list):
+    # add PAD_CHAR, SOS_CHAR, EOS_CHAR, UNK_CHAR
+    label2id, id2label = {}, {}
+    count = 0
 
-def save_model(model, epoch, opt, metrics, src_label2id, src_id2label, trg_label2ids, trg_id2labels, best_model=False):
+    for i in range(len(special_token_list)):
+        label2id[special_token_list[i]] = count
+        id2label[count] = special_token_list[i]
+        count += 1
+    
+    for i in range(len(labels)):
+        if labels[i] not in label2id:
+            labels[i] = labels[i]
+            label2id[labels[i]] = count
+            id2label[count] = labels[i]
+            count += 1
+        else:
+            print("multiple label: ", labels[i])
+    return label2id, id2label
+
+def compute_num_params(model):
+    """
+    Computes number of trainable and non-trainable parameters
+    """
+    sizes = [(np.array(p.data.size()).prod(), int(p.requires_grad)) for p in model.parameters()]
+    return sum(map(lambda t: t[0]*t[1], sizes)), sum(map(lambda t: t[0]*(1 - t[1]), sizes))
+
+def save_model(model, epoch, opt, metrics, src_label2id, src_id2label, trg_label2ids, trg_id2labels, args, best_model=False):
     """
     Saving model, TODO adding history
     """
     if best_model:
         save_path = "{}/{}/best_model.th".format(
-            constant.args.save_folder, constant.args.name)
+            args.save_folder, args.name)
     else:
-        save_path = "{}/{}/epoch_{}.th".format(constant.args.save_folder,
-                                               constant.args.name, epoch)
+        save_path = "{}/{}/epoch_{}.th".format(args.save_folder,
+                                               args.name, epoch)
 
-    if not os.path.exists(constant.args.save_folder + "/" + constant.args.name):
-        os.makedirs(constant.args.save_folder + "/" + constant.args.name)
+    if not os.path.exists(args.save_folder + "/" + args.name):
+        os.makedirs(args.save_folder + "/" + args.name)
 
     print("SAVE MODEL to", save_path)
     logging.info("SAVE MODEL to " + save_path)
-    if constant.args.loss == "ce":
+    if args.loss == "ce":
         args = {
             'src_label2id': src_label2id,
             'src_id2label': src_id2label,
             'trg_label2ids': trg_label2ids,
             'trg_id2labels': trg_id2labels,
-            'args': constant.args,
+            'args': args,
             'epoch': epoch,
             'model_state_dict': model.state_dict(),
             'optimizer_state_dict': opt.optimizer.state_dict(),
@@ -48,11 +71,11 @@ def save_model(model, epoch, opt, metrics, src_label2id, src_id2label, trg_label
             },
             'metrics': metrics
         }
-    elif constant.args.loss == "ctc":
+    elif args.loss == "ctc":
         args = {
             'label2id': label2id,
             'id2label': id2label,
-            'args': constant.args,
+            'args': args,
             'epoch': epoch,
             'model_state_dict': model.state_dict(),
             'optimizer_state_dict': opt.optimizer.state_dict(),
@@ -81,10 +104,7 @@ def load_model(load_path, train=True):
     if 'args' in checkpoint:
         args = checkpoint['args']
 
-    src_label2id = checkpoint['src_label2id']
-    src_id2label = checkpoint['src_id2label']
-    trg_label2ids = checkpoint['trg_label2ids']
-    trg_id2labels = checkpoint['trg_id2labels']
+    vocab = checkpoint['vocab']
     is_factorized = args.is_factorized
     r = args.r
 
@@ -92,7 +112,7 @@ def load_model(load_path, train=True):
     args.k_lr = 1
     args.min_lr = 1e-6
 
-    model = init_transformer_model(args, src_label2id, src_id2label, trg_label2ids, trg_id2labels, train=train, is_factorized=is_factorized, r=r)
+    model = init_transformer_model(args, vocab, train=train, is_factorized=is_factorized, r=r)
     model.load_state_dict(checkpoint['model_state_dict'])
     if args.cuda:
         print("CUDA")
@@ -103,13 +123,13 @@ def load_model(load_path, train=True):
     opt = init_optimizer(args, model)
     if opt is not None:
         opt.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
-        if constant.args.loss == "ce":
+        if args.loss == "ce":
             opt._step = checkpoint['optimizer_params']['_step']
             opt._rate = checkpoint['optimizer_params']['_rate']
             opt.warmup = checkpoint['optimizer_params']['warmup']
             opt.factor = checkpoint['optimizer_params']['factor']
             opt.model_size = checkpoint['optimizer_params']['model_size']
-        elif constant.args.loss == "ctc":
+        elif args.loss == "ctc":
             opt.lr = checkpoint['optimizer_params']['lr']
             opt.lr_anneal = checkpoint['optimizer_params']['lr_anneal']
         else:
@@ -134,35 +154,7 @@ def init_optimizer(args, model, opt_type="noam"):
 
     return opt
 
-
-def init_las_model(args, label2id, id2label):
-    """
-    Initialize a new Listen-Attend-Spell object
-    """
-    dim_input = args.dim_input
-    dim_model = args.dim_model
-    dim_emb = args.dim_emb
-    num_layers = args.num_layers
-    dropout = args.dropout
-
-    if hasattr(args, 'bidirectional'):
-        bidirectional = args.bidirectional
-    else:
-        bidirectional = False
-    
-    tgt_max_len = args.tgt_max_len
-    emb_trg_sharing = args.emb_trg_sharing
-
-    encoder = LASEncoder(dim_input, dim_model=dim_model,
-                         num_layers=num_layers, dropout=dropout, bidirectional=bidirectional)
-    decoder = LASDecoder(id2label, num_src_vocab=len(label2id), num_trg_vocab=len(label2id), num_layers=num_layers,
-                         dim_emb=dim_emb, dim_model=dim_model, dropout=dropout, trg_max_length=tgt_max_len, emb_trg_sharing=emb_trg_sharing)
-    model = LAS(encoder, decoder)
-
-    return model
-
-
-def init_transformer_model(args, src_label2id, src_id2label, trg_label2ids, trg_id2labels, train=True, is_factorized=False, r=100):
+def init_transformer_model(args, vocab, train=True, is_factorized=False, r=100):
     """
     Initiate a new transformer object
     """
@@ -200,26 +192,17 @@ def init_transformer_model(args, src_label2id, src_id2label, trg_label2ids, trg_
     dropout = args.dropout
     emb_trg_sharing = args.emb_trg_sharing
     feat_extractor = args.feat_extractor
-    combine_decoder = args.combine_decoder
-    
-    if args.train_lang_list is not None:
-        num_lang = len(args.train_lang_list)
-    else:
-        num_lang = 0
 
-    encoder = Encoder(num_enc_layers, num_heads=num_heads, dim_model=dim_model, dim_key=dim_key,
-                      dim_value=dim_value, dim_input=dim_input, dim_inner=dim_inner, src_max_length=src_max_len, dropout=dropout, num_lang=num_lang, is_factorized=is_factorized, r=r)
-    decoder = Decoder(src_label2id, src_id2label, trg_label2ids, trg_id2labels, num_layers=num_dec_layers, num_heads=num_heads,
-                      dim_emb=dim_emb, dim_model=dim_model, dim_inner=dim_inner, dim_key=dim_key, dim_value=dim_value, trg_max_length=tgt_max_len, dropout=dropout, emb_trg_sharing=emb_trg_sharing, num_lang=num_lang,
-                      combine_decoder=combine_decoder, is_factorized=is_factorized, r=r)
+    encoder = Encoder(num_enc_layers, num_heads=num_heads, dim_model=dim_model, dim_key=dim_key, dim_value=dim_value, dim_input=dim_input, dim_inner=dim_inner, src_max_length=src_max_len, dropout=dropout, is_factorized=is_factorized, r=r)
+    decoder = Decoder(vocab, num_layers=num_dec_layers, num_heads=num_heads, dim_emb=dim_emb, dim_model=dim_model, dim_inner=dim_inner, dim_key=dim_key, dim_value=dim_value, trg_max_length=tgt_max_len, dropout=dropout, emb_trg_sharing=emb_trg_sharing, is_factorized=is_factorized, r=r)
     decoder = decoder if train else decoder
     model = Transformer(encoder, decoder, feat_extractor=feat_extractor, train=train)
 
     if args.parallel:
         device_ids = args.device_ids
-        if constant.args.device_ids:
-            print("load with device_ids", constant.args.device_ids)
-            model = DataParallel(model, device_ids=constant.args.device_ids)
+        if args.device_ids:
+            print("load with device_ids", args.device_ids)
+            model = DataParallel(model, device_ids=args.device_ids)
         else:
             model = DataParallel(model)
 
@@ -245,9 +228,9 @@ def init_deepspeech_model(args, label2id, id2label):
 
     if args.parallel:
         device_ids = args.device_ids
-        if constant.args.device_ids:
-            print("load with device_ids", constant.args.device_ids)
-            model = DataParallel(model, device_ids=constant.args.device_ids)
+        if args.device_ids:
+            print("load with device_ids", args.device_ids)
+            model = DataParallel(model, device_ids=args.device_ids)
         else:
             model = DataParallel(model)
 
@@ -270,9 +253,9 @@ def init_lm_transformer_model(args, label2id, id2label):
     model = TransformerLM(id2label, num_src_vocab=len(label2id), num_trg_vocab=len(label2id), num_layers=num_layers, dim_emb=dim_emb, dim_model=dim_model, dim_inner=dim_inner, num_heads=num_heads, dim_key=dim_key, dim_value=dim_value, trg_max_length=tgt_max_len, dropout=dropout)
 
     if args.parallel:
-        if constant.args.device_ids:
-            print("load with device_ids", constant.args.device_ids)
-            model = DataParallel(model, device_ids=constant.args.device_ids)
+        if args.device_ids:
+            print("load with device_ids", args.device_ids)
+            model = DataParallel(model, device_ids=args.device_ids)
         else:
             model = DataParallel(model)
 
