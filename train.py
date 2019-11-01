@@ -219,4 +219,4 @@ if __name__ == '__main__':
             compute_num_params(model)[0], compute_num_params(model)[1]))
 
     trainer = Trainer()
-    trainer.train(model, train_loader, train_sampler, valid_loader_list, special_token_list, opt, loss_type, start_epoch, num_epochs, src_label2id, src_id2label, trg_label2id, trg_id2label, metrics, early_stop=args.early_stop, is_accu_loss=args.is_accu_loss)
+    trainer.train(model, vocab, train_loader, train_sampler, valid_loader_list, opt, loss_type, start_epoch, num_epochs, metrics, early_stop=args.early_stop, is_accu_loss=args.is_accu_loss)

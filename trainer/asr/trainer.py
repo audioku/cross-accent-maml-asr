@@ -80,7 +80,7 @@ class Trainer():
 
         return loss, total_cer, total_char
 
-    def train(self, model, train_loader, train_sampler, valid_loader_list, special_token_list, opt, loss_type, start_epoch, num_epochs, src_label2id, src_id2label, trg_label2ids, trg_id2labels, last_metrics=None, early_stop=10, is_accu_loss=False):
+    def train(self, model, vocab, train_loader, train_sampler, valid_loader_list, opt, loss_type, start_epoch, num_epochs, last_metrics=None, early_stop=10, is_accu_loss=False):
         """
         Training
         args:
@@ -120,17 +120,41 @@ class Trainer():
 
                 opt.zero_grad()
 
-                if is_accu_loss: # experimental
+                try:
+                    if constant.USE_CUDA:
+                        src = src.cuda()
+                        trg = trg.cuda()
+                        trg_transcript = trg_transcript.cuda()
+                        langs = langs.cuda()
+
+                    start_time = time.time()
+                    loss, cer, num_char = self.train_one_batch(model, src, trg, trg_transcript, src_percentages, src_lengths, trg_lengths, langs, lang_names, special_token_list, trg_id2labels, smoothing, loss_type)
+                    total_cer += cer
+                    total_char += num_char
+                    loss.backward()
+
+                    if constant.args.clip:
+                        torch.nn.utils.clip_grad_norm_(model.parameters(), constant.args.max_norm)
+                    
+                    opt.step()
+                    total_loss += loss.item()
+
+                    end_time = time.time()
+                    diff_time = end_time - start_time
+                    total_time += diff_time
+
+                    pbar.set_description("(Epoch {}) TRAIN LOSS:{:.4f} CER:{:.2f}% LR:{:.7f} TOTAL TIME:{:.7f}".format(
+                        (epoch+1), total_loss/(i+1), total_cer*100/total_char, opt._rate, total_time))
+                except:
+                    # del loss
                     try:
+                        torch.cuda.empty_cache()
                         src = src.cpu()
                         trg = trg.cpu()
-                        trg_transcript = trg_transcript.cpu()
-
-                        src_splits, src_lengths_splits, trg_lengths_splits, trg_splits, trg_transcript_splits, src_percentages_splits, langs_splits = iter(src.split(8, dim=0)), iter(src_lengths.split(8, dim=0)), iter(trg_lengths.split(8, dim=0)), iter(trg.split(8, dim=0)), iter(trg_transcript.split(8, dim=0)), iter(src_percentages.split(8, dim=0)), iter(langs.split(8, dim=0))
+                        src_splits, src_lengths_splits, trg_lengths_splits, trg_splits, trg_transcript_splits, src_percentages_splits, langs_splits = iter(src.split(2, dim=0)), iter(src_lengths.split(2, dim=0)), iter(trg_lengths.split(2, dim=0)), iter(trg.split(2, dim=0)), iter(trg_transcript.split(2, dim=0)), iter(src_percentages.split(2, dim=0)), iter(langs.split(2, dim=0))
                         j = 0
 
                         start_time = time.time()
-                        split_loss = None
                         for src, trg, src_lengths, trg_lengths, trg_transcript, src_percentages, langs in zip(src_splits, trg_splits, src_lengths_splits, trg_lengths_splits, trg_transcript_splits, src_percentages_splits, langs_splits):
                             opt.zero_grad()
                             torch.cuda.empty_cache()
@@ -138,94 +162,30 @@ class Trainer():
                                 src = src.cuda()
                                 trg = trg.cuda()
 
-                            loss, cer, num_char = self.train_one_batch(model, src, trg, trg_transcript, src_percentages, src_lengths, trg_lengths, langs, lang_names[j*8:j*8+8], special_token_list, trg_id2labels, smoothing, loss_type)
+                            start_time = time.time()
+                            loss, cer, num_char = self.train_one_batch(model, src, trg, trg_transcript, src_percentages, src_lengths, trg_lengths, langs, lang_names[j*2:j*2+2], special_token_list, trg_id2labels, smoothing, loss_type)
                             total_cer += cer
                             total_char += num_char
-                            
                             loss.backward()
-                            split_loss = loss.item() if split_loss is None else split_loss + loss.item()
+
+                            if constant.args.clip:
+                                torch.nn.utils.clip_grad_norm_(model.parameters(), constant.args.max_norm)
+                            
+                            opt.step()
+                            total_loss += loss.item()
                             j += 1
-                        total_loss += split_loss / j
-                        
-                        if constant.args.clip:
-                            torch.nn.utils.clip_grad_norm_(model.parameters(), constant.args.max_norm)
-                        
-                        opt.step()
 
                         end_time = time.time()
                         diff_time = end_time - start_time
                         total_time += diff_time
+                        logging.info("probably OOM, autosplit batch. succeeded")
+                        print("probably OOM, autosplit batch. succeeded")
                     except:
-                        logging.info("accu loss. skip")
-                        print("accu loss. skip")
+                        logging.info("probably OOM, autosplit batch. skip batch")
+                        print("probably OOM, autosplit batch. skip batch")
                         continue
-                else: # normal loss
-                    try:
-                        if constant.USE_CUDA:
-                            src = src.cuda()
-                            trg = trg.cuda()
-                            trg_transcript = trg_transcript.cuda()
-                            langs = langs.cuda()
 
-                        start_time = time.time()
-                        loss, cer, num_char = self.train_one_batch(model, src, trg, trg_transcript, src_percentages, src_lengths, trg_lengths, langs, lang_names, special_token_list, trg_id2labels, smoothing, loss_type)
-                        total_cer += cer
-                        total_char += num_char
-                        loss.backward()
-
-                        if constant.args.clip:
-                            torch.nn.utils.clip_grad_norm_(model.parameters(), constant.args.max_norm)
-                        
-                        opt.step()
-                        total_loss += loss.item()
-
-                        end_time = time.time()
-                        diff_time = end_time - start_time
-                        total_time += diff_time
-
-                        pbar.set_description("(Epoch {}) TRAIN LOSS:{:.4f} CER:{:.2f}% LR:{:.7f} TOTAL TIME:{:.7f}".format(
-                            (epoch+1), total_loss/(i+1), total_cer*100/total_char, opt._rate, total_time))
-                    except:
-                        # del loss
-                        try:
-                            torch.cuda.empty_cache()
-                            src = src.cpu()
-                            trg = trg.cpu()
-                            src_splits, src_lengths_splits, trg_lengths_splits, trg_splits, trg_transcript_splits, src_percentages_splits, langs_splits = iter(src.split(2, dim=0)), iter(src_lengths.split(2, dim=0)), iter(trg_lengths.split(2, dim=0)), iter(trg.split(2, dim=0)), iter(trg_transcript.split(2, dim=0)), iter(src_percentages.split(2, dim=0)), iter(langs.split(2, dim=0))
-                            j = 0
-
-                            start_time = time.time()
-                            for src, trg, src_lengths, trg_lengths, trg_transcript, src_percentages, langs in zip(src_splits, trg_splits, src_lengths_splits, trg_lengths_splits, trg_transcript_splits, src_percentages_splits, langs_splits):
-                                opt.zero_grad()
-                                torch.cuda.empty_cache()
-                                if constant.USE_CUDA:
-                                    src = src.cuda()
-                                    trg = trg.cuda()
-
-                                start_time = time.time()
-                                loss, cer, num_char = self.train_one_batch(model, src, trg, trg_transcript, src_percentages, src_lengths, trg_lengths, langs, lang_names[j*2:j*2+2], special_token_list, trg_id2labels, smoothing, loss_type)
-                                total_cer += cer
-                                total_char += num_char
-                                loss.backward()
-
-                                if constant.args.clip:
-                                    torch.nn.utils.clip_grad_norm_(model.parameters(), constant.args.max_norm)
-                                
-                                opt.step()
-                                total_loss += loss.item()
-                                j += 1
-
-                            end_time = time.time()
-                            diff_time = end_time - start_time
-                            total_time += diff_time
-                            logging.info("probably OOM, autosplit batch. succeeded")
-                            print("probably OOM, autosplit batch. succeeded")
-                        except:
-                            logging.info("probably OOM, autosplit batch. skip batch")
-                            print("probably OOM, autosplit batch. skip batch")
-                            continue
-
-                pbar.set_description("(Epoch {}) TRAIN LOSS:{:.4f} CER:{:.2f}% LR:{:.7f} TOTAL TIME:{:.7f}".format((epoch+1), total_loss/(i+1), total_cer*100/total_char, opt._rate, total_time))
+            pbar.set_description("(Epoch {}) TRAIN LOSS:{:.4f} CER:{:.2f}% LR:{:.7f} TOTAL TIME:{:.7f}".format((epoch+1), total_loss/(i+1), total_cer*100/total_char, opt._rate, total_time))
 
             final_train_loss = total_loss/(len(train_loader))
             final_train_cer = total_cer*100/total_char
@@ -325,8 +285,7 @@ class Trainer():
             logging.info("AVG VALID LOSS:{:.4f} AVG CER:{:.2f}%".format(sum(final_valid_losses) / len(final_valid_losses), sum(final_valid_cers) / len(final_valid_cers)))
 
             if epoch % constant.args.save_every == 0:
-                save_model(model, (epoch+1), opt, metrics,
-                        src_label2id, src_id2label, trg_label2ids, trg_id2labels, best_model=False)
+                save_model(model, vocab, (epoch+1), opt, metrics, best_model=False)
 
             # save the best model
             early_stop_criteria, early_stop_val
@@ -335,8 +294,7 @@ class Trainer():
                 if best_valid_val > avg_valid_cer:
                     count_stop = 0
                     best_valid_val = avg_valid_cer
-                    save_model(model, (epoch+1), opt, metrics,
-                            src_label2id, src_id2label, trg_label2ids, trg_id2labels, best_model=True)
+                    save_model(model, vocab, (epoch+1), opt, metrics, best_model=True)
                 else:
                     print("count_stop:", count_stop)
                     count_stop += 1
@@ -345,8 +303,7 @@ class Trainer():
                 if best_valid_val > avg_valid_loss:
                     count_stop = 0
                     best_valid_val = avg_valid_loss
-                    save_model(model, (epoch+1), opt, metrics,
-                            src_label2id, src_id2label, trg_label2ids, trg_id2labels, best_model=True)
+                    save_model(model, vocab, (epoch+1), opt, metrics, best_model=True)
                 else:
                     count_stop += 1
                     print("count_stop:", count_stop)
