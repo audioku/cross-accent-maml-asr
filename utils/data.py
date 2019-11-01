@@ -1,59 +1,21 @@
-import os
-import torch
-
-from collections import Counter
-
-
-class Dictionary(object):
+class Vocab(object):
     def __init__(self):
-        self.word2idx = {}
-        self.idx2word = []
-        self.counter = Counter()
-        self.total = 0
+        special_token_list = ["<PAD>","<SOS>","<EOS>","<OOV>"]
+        self.token2id, self.id2token = {}, []
+        self.label2id, self.id2label = {}, []
 
-    def add_word(self, word):
-        if word not in self.word2idx:
-            self.idx2word.append(word)
-            self.word2idx[word] = len(self.idx2word) - 1
-        token_id = self.word2idx[word]
-        self.counter[token_id] += 1
-        self.total += 1
-        return self.word2idx[word]
+        for token in special_token_list:
+            self.add_token(token)
+            self.add_label(token)
 
-    def __len__(self):
-        return len(self.idx2word)
+    def add_token(self, token):
+        if token not in self.id2token:
+            idx = len(self.token2id)
+            self.id2token.append(token)
+            self.token2id[token] = idx
 
-
-class Corpus(object):
-    def __init__(self, train_path, valid_path, test_path):
-        self.dictionary = Dictionary()
-        self.train = self.tokenize(train_path)
-        self.valid = self.tokenize(valid_path)
-        self.test = self.tokenize(test_path)
-
-    def tokenize(self, path):
-        """Tokenizes a text file."""
-        assert os.path.exists(path)
-
-        self.dictionary.add_word('<oov>')
-
-        # Add words to the dictionary
-        with open(path, 'r') as f:
-            tokens = 0
-            for line in f:
-                words = line.split() + ['<eos>']
-                tokens += len(words)
-                for word in words:
-                    self.dictionary.add_word(word)
-
-        # Tokenize file content
-        with open(path, 'r') as f:
-            ids = torch.LongTensor(tokens)
-            token = 0
-            for line in f:
-                words = line.split() + ['<eos>']
-                for word in words:
-                    ids[token] = self.dictionary.word2idx[word]
-                    token += 1
-
-        return ids
+    def add_label(self, label):
+        if label not in self.id2label:
+            idx = len(self.label2id)
+            self.id2label.append(label)
+            self.label2id[label] = idx

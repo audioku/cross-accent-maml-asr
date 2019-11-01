@@ -102,7 +102,7 @@ class SpectrogramParser(AudioParser):
         raise NotImplementedError
 
 class LogFBankDataset(Dataset):
-    def __init__(self, audio_conf, lang_list, manifest_filepath_list, label2id, normalize=False, augment=False, input_type="char"):
+    def __init__(self, audio_conf, manifest_filepath_list, label2id, normalize=False, augment=False, input_type="char"):
         """
         Dataset that loads tensors via a csv containing file paths to audio files and transcripts separated by
         a comma. Each new line is a different sample. Example below:
@@ -183,7 +183,7 @@ class LogFBankDataset(Dataset):
         return self.max_size
 
 class SpectrogramDataset(Dataset, SpectrogramParser):
-    def __init__(self, audio_conf, lang_list, all_lang_list, manifest_filepath_list, src_label2id, trg_label2ids, normalize=False, augment=False, input_type="char", is_train=False):
+    def __init__(self, audio_conf, manifest_filepath_list, src_label2id, trg_label2id, normalize=False, augment=False, input_type="char", is_train=False):
         """
         Dataset that loads tensors via a csv containing file paths to audio files and transcripts separated by
         a comma. Each new line is a different sample. Example below:
@@ -208,7 +208,7 @@ class SpectrogramDataset(Dataset, SpectrogramParser):
             self.ids_list.append(ids)
             self.max_size = max(len(ids), self.max_size)
 
-        self.max_size = self.max_size * len(lang_list)
+        self.max_size = self.max_size * len(manifest_filepath_list)
         if self.is_train:
             if len(manifest_filepath_list) == 1:
                 self.max_size = self.max_size

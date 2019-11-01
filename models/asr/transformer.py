@@ -255,7 +255,7 @@ class Decoder(nn.Module):
     Decoder Layer Transformer class
     """
 
-    def __init__(self, src_label2id, src_id2label, trg_label2ids, trg_id2labels, num_layers, num_heads, dim_emb, dim_model, dim_inner, dim_key, dim_value, dropout=0.1, trg_max_length=1000, emb_trg_sharing=False, num_lang=0, combine_decoder=False, is_factorized=False, r=100):
+    def __init__(self, vocab, num_layers, num_heads, dim_emb, dim_model, dim_inner, dim_key, dim_value, dropout=0.1, trg_max_length=1000, emb_trg_sharing=False, num_lang=0, combine_decoder=False, is_factorized=False, r=100):
         super(Decoder, self).__init__()
         self.sos_id = constant.SOS_TOKEN
         self.eos_id = constant.EOS_TOKEN
