@@ -111,24 +111,11 @@ class Transformer(nn.Module):
                     hyp_best_scores, hyp_best_ids = torch.topk(pred, 1, dim=2)
                     hyp_seq = hyp_best_ids.squeeze(2)
                     hyp_list.append(hyp_seq)
-                    # print(hyp_seq.size(), gold.size())
                 else:
                     hyp_list.append([])
             return pred_list, gold_list, hyp_list
         except:
             torch.cuda.empty_cache()
-            # del padded_input
-            # del padded_input_splits
-            # del input_lengths_splits
-            # del langs_splits
-            # del encoder_padded_outputs
-            # del pred_list
-            # del gold_list
-            # del hyp_list
-            # del hyp_seq
-            # del hyp_best_scores
-            # del hyp_best_ids
-            # return None, None, None
 
     def evaluate(self, padded_input, input_lengths, padded_target, padded_target_transcript, beam_search=False, beam_width=0, beam_nbest=0, lm=None, lm_rescoring=False, lm_weight=0.1, c_weight=1, start_token=constant.SOS_TOKEN, langs=None, lang_names=None, verbose=False, lang_id=0):
         """
@@ -150,18 +137,10 @@ class Transformer(nn.Module):
         padded_input = padded_input.transpose(1, 2).contiguous()  # BxTxH
 
         encoder_padded_outputs, _ = self.encoder(padded_input, input_lengths)
-        # hyp, gold, *_ = self.decoder(padded_target, padded_target_transcript,  encoder_padded_outputs, input_lengths, langs=langs, lang_names=lang_names)
         pred_list, gold_list, *_ = self.decoder(padded_target, padded_target_transcript, encoder_padded_outputs, input_lengths, langs=langs, lang_names=lang_names)
-
-        # print(gold_list)
-        # print(lang_id, len(self.trg_id2labels))
-        # print(len(self.trg_id2labels[lang_id]))
-
-        # if len(self.trg_id2labels) == 1:
-        #     gold = gold_list[0]
-        # else:
+       
         gold = gold_list[lang_id]
-        # print(gold)
+
         if len(self.trg_id2labels) == 1:
             strs_gold = ["".join([self.trg_id2labels[0][int(x)] for x in gold_seq]) for gold_seq in gold]
         else:
@@ -174,10 +153,6 @@ class Transformer(nn.Module):
                 strs_hyps = self.decoder.greedy_search(encoder_padded_outputs, start_token=start_token, lang_id=lang_id)
         else:
             strs_hyps = self.decoder.greedy_search(encoder_padded_outputs, start_token=start_token, lang_id=lang_id)
-        
-        # if verbose:
-        #     print("GOLD", strs_gold)
-        #     print("HYP", strs_hyps)
 
         return _, strs_hyps, strs_gold
 
@@ -216,10 +191,6 @@ class Encoder(nn.Module):
         self.positional_encoding = PositionalEncoding(
             dim_model, src_max_length)
 
-        # if num_lang > 0:
-        #     print("lang", num_lang)
-        #     self.lang_encoding = nn.Embedding(num_lang, dim_model)
-
         self.layers = nn.ModuleList([
             EncoderLayer(num_heads, dim_model, dim_inner, dim_key, dim_value, dropout=dropout, is_factorized=is_factorized, r=r) for _ in range(num_layers)
         ])
@@ -239,11 +210,6 @@ class Encoder(nn.Module):
         seq_len = padded_input.size(1)
         self_attn_mask = get_attn_pad_mask(padded_input, input_lengths, seq_len)  # B x T x T
 
-        # if langs is not None and self.num_lang > 0:
-        #     out = self.layer_norm_input(self.input_linear(
-        #         padded_input)) + self.positional_encoding(padded_input)
-        #     encoder_output = out + self.lang_encoding(langs.unsqueeze(-1).repeat(1,out.size(1)))
-        # else:
         if self.is_factorized:
             encoder_output = self.layer_norm_input(self.input_linear_b(self.input_linear_a(
                 padded_input))) + self.positional_encoding(padded_input)
@@ -283,7 +249,6 @@ class EncoderLayer(nn.Module):
         enc_output *= non_pad_mask
 
         return enc_output, self_attn
-
 
 class Decoder(nn.Module):
     """
@@ -385,13 +350,9 @@ class Decoder(nn.Module):
             pred: B x T x vocab
             gold: B x T
         """
-        # print("langs:", langs)
-        # print("output linears", len(self.output_linears))
         decoder_self_attn_list, decoder_encoder_attn_list = [], []
         seq_in_pad, _ = self.preprocess(padded_input, langs, lang_names)
         _, seq_out_pad = self.preprocess(padded_input_transcript, langs, lang_names)
-        # print(seq_out_pad)
-        # print(padded_input_transcript)
 
         # Prepare masks
         non_pad_mask = get_non_pad_mask(seq_in_pad, pad_idx=constant.EOS_TOKEN)
@@ -414,8 +375,6 @@ class Decoder(nn.Module):
             decoder_self_attn_list += [decoder_self_attn]
             decoder_encoder_attn_list += [decoder_enc_attn]
 
-        # print(langs.size(), decoder_output.size())
-        # print(langs)
         final_decoded_output = []
         final_gold = []
         for i in range(self.num_lang):
@@ -429,8 +388,6 @@ class Decoder(nn.Module):
                 idx = langs[i]
             if len(self.output_linears) == 1:
                 idx = 0
-            # print(">>>", idx)
-            # print(self.output_linears[idx](decoder_output[i].unsqueeze(0)).size())
             final_decoded_output[langs[i]].append(self.output_linears[idx](decoder_output[i].unsqueeze(0)).squeeze())
             final_gold[langs[i]].append(seq_out_pad[i])
         
@@ -439,13 +396,6 @@ class Decoder(nn.Module):
                final_decoded_output[i] = torch.stack(final_decoded_output[i], dim=0)
             if len(final_gold[i]) > 0:
                 final_gold[i] = torch.stack(final_gold[i], dim=0)
-
-            # print("final_decoder_output["+str(langs[i])+"]", final_decoded_output[langs[i]].size())
-            # print("final_gold["+str(langs[i])+"]", final_gold[langs[i]].size())
-
-        # print(seq_logit.size())
-        # seq_logit = self.output_linear(decoder_output)
-        # pred, gold = seq_logit, seq_out_pad
 
         return final_decoded_output, final_gold, decoder_self_attn_list, decoder_encoder_attn_list
 

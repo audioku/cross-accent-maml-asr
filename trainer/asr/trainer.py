@@ -28,22 +28,22 @@ class Trainer():
     def train_one_batch(self, model, src, trg, trg_transcript, src_percentages, src_lengths, trg_lengths, langs, lang_names, special_token_list, trg_id2labels, smoothing, loss_type):
         pred, gold, hyp = model(src, src_lengths, trg, trg_transcript, langs, lang_names, verbose=False)
         strs_golds, strs_hyps = [], []
+
         for lang_id in range(len(gold)):
             gold_seq = gold[lang_id]
             for j in range(len(gold_seq)):
                 ut_gold = gold_seq[j]
-                if len(trg_id2labels) == 1:
-                    lang_id = 0
+                if len(trg_id2labels) == 1: lang_id = 0
                 strs_golds.append("".join([trg_id2labels[lang_id][int(x)] for x in ut_gold]))
+        
         for lang_id in range(len(hyp)):
             hyp_seq = hyp[lang_id]
             for j in range(len(hyp_seq)):
                 ut_hyp = hyp_seq[j]
-                if len(trg_id2labels) == 1:
-                    lang_id = 0
+                if len(trg_id2labels) == 1: lang_id = 0
                 strs_hyps.append("".join([trg_id2labels[lang_id][int(x)] for x in ut_hyp]))
 
-        # case for the last batch
+        # handling the last batch
         for j in range(len(pred)):
             if len(pred[j]) > 0:
                 seq_length = pred[j].size(1)
@@ -52,9 +52,7 @@ class Trainer():
 
         loss = None
         for j in range(len(pred)):
-            # try:
-            if len(pred[j]) == 0:
-                continue
+            if len(pred[j]) == 0: continue
             t_loss, num_correct = calculate_metrics(
                 pred[j], gold[j], input_lengths=sizes, target_lengths=trg_lengths, smoothing=smoothing, loss_type=loss_type)
             if loss is None:
@@ -79,11 +77,6 @@ class Trainer():
             total_wer += wer
             total_char += len(strs_golds[j].replace(' ', ''))
             total_word += len(strs_golds[j].split(" "))
-        
-        # del strs_hyps
-        # del strs_golds
-        # del cer
-        # del wer
 
         return loss, total_cer, total_char
 
@@ -297,14 +290,6 @@ class Trainer():
                                 
                                 total_valid_loss += loss.item()
                                 j += 1
-                                # del loss
-                                # del src
-                                # del trg
-                                # del trg_transcript
-                                # del src_percentages
-                                # del src_lengths
-                                # del trg_lengths
-                                # del langs
                             valid_pbar.set_description("VALID SET {} LOSS:{:.4f} CER:{:.2f}%".format(ind, total_valid_loss/(i+1), total_valid_cer*100/total_valid_char))
 
                             logging.info("probably OOM, autosplit batch. succeeded")
@@ -335,6 +320,7 @@ class Trainer():
             metrics["valid_cer"] = final_valid_cers
             metrics["history"] = history
             history.append(metrics)
+
             print("AVG VALID LOSS:{:.4f} AVG CER:{:.2f}%".format(sum(final_valid_losses) / len(final_valid_losses), sum(final_valid_cers) / len(final_valid_cers)))
             logging.info("AVG VALID LOSS:{:.4f} AVG CER:{:.2f}%".format(sum(final_valid_losses) / len(final_valid_losses), sum(final_valid_cers) / len(final_valid_cers)))
 

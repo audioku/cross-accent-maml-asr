@@ -12,6 +12,42 @@ from utils.optimizer import NoamOpt, AnnealingOpt
 from utils import constant
 from utils.parallel import DataParallel
 
+def generate_labels(labels, train_lang_list, valid_lang_list, prefix_list, lang_list, special_token_list):
+    # add PAD_CHAR, SOS_CHAR, EOS_CHAR, UNK_CHAR
+    label2id, id2label = {}, {}
+    count = 0
+
+    if len(train_lang_list) == 0:
+        train_lang_list = [SOS_CHAR] * len(args.train_manifest_list)
+    if len(valid_lang_list) == 0:
+        valid_lang_list = [SOS_CHAR] * len(args.valid_manifest_list)
+
+    for i in range(len(prefix_list)):
+        label2id[prefix_list[i]] = count
+        id2label[count] = prefix_list[i]
+        count += 1
+    
+    for i in range(len(lang_list)):
+        label2id[lang_list[i]] = count
+        id2label[count] = lang_list[i]
+        count += 1
+
+    for i in range(len(labels)):
+        if labels[i] not in label2id:
+            labels[i] = labels[i]
+            label2id[labels[i]] = count
+            id2label[count] = labels[i]
+            count += 1
+        else:
+            print("multiple label: ", labels[i])
+    return label2id, id2label
+
+def compute_num_params(model):
+    """
+    Computes number of trainable and non-trainable parameters
+    """
+    sizes = [(np.array(p.data.size()).prod(), int(p.requires_grad)) for p in model.parameters()]
+    return sum(map(lambda t: t[0]*t[1], sizes)), sum(map(lambda t: t[0]*(1 - t[1]), sizes))
 
 def save_model(model, epoch, opt, metrics, src_label2id, src_id2label, trg_label2ids, trg_id2labels, best_model=False):
     """
