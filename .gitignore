@@ -11,7 +11,7 @@ __pycache__/
 # C extensions
 *.so
 
-data/
+data/LibriSpeech_dataset/
 
 # Distribution / packaging
 .Python
