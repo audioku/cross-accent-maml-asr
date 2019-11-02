@@ -6,22 +6,19 @@ import os
 import scipy.signal
 import torch
 import random
+import logging
+import epitran
+import scipy.io.wavfile as wav
 
 from torch.distributed import get_rank
 from torch.distributed import get_world_size
 from torch.utils.data import DataLoader
 from torch.utils.data import Dataset
 from torch.utils.data.sampler import Sampler
-
 from utils.audio import load_audio, get_audio_length, audio_with_sox, augment_audio_with_sox, load_randomly_augmented_audio
-import logging
-
 from bpemb import BPEmb
-import epitran
-
 from python_speech_features import mfcc
 from python_speech_features import logfbank
-import scipy.io.wavfile as wav
 
 windows = {'hamming': scipy.signal.hamming, 'hann': scipy.signal.hann, 'blackman': scipy.signal.blackman,
            'bartlett': scipy.signal.bartlett}
@@ -245,15 +242,15 @@ class SpectrogramDataset(Dataset, SpectrogramParser):
 
             audio_path, transcript_path = sample[0], sample[1]
             spect = self.parse_audio(audio_path)[:,:self.args.src_max_len]
-            transcript, target_transcript = self.parse_transcript(transcript_path)
+            transcript = self.parse_transcript(transcript_path)
         else: # valid or test
             ids = self.ids_list[0]
             sample = ids[index % len(ids)]
  
             audio_path, transcript_path = sample[0], sample[1]
             spect = self.parse_audio(audio_path)[:,:self.args.src_max_len]
-            transcript, target_transcript = self.parse_transcript(transcript_path)
-        return spect, transcript, target_transcript
+            transcript = self.parse_transcript(transcript_path)
+        return spect, transcript
 
     def parse_transcript(self, transcript_path):
         if self.input_type == "char":
@@ -270,8 +267,7 @@ class SpectrogramDataset(Dataset, SpectrogramParser):
         #         cur_transcript = cur_transcript + [bpes[i]]
 
         transcript = list(filter(None, [self.vocab.label2id.get(x) for x in list(cur_transcript)]))
-        target_transcript = list(filter(None, [self.vocab.label2id.get(x) for x in list(cur_transcript)]))
-        return transcript, target_transcript
+        return transcript
 
     def __len__(self):
         return self.max_size
@@ -327,39 +323,28 @@ def _collate_fn(batch):
     max_seq_len = max(batch, key=func)[0].size(1)
     freq_size = max(batch, key=func)[0].size(0)
     max_trg_len = len(max(batch, key=func_trg)[1])
-    max_trg_transcript_len = len(max(batch, key=func_trg_transcript)[2])
 
     inputs = torch.zeros(len(batch), 1, freq_size, max_seq_len)
     input_sizes = torch.IntTensor(len(batch))
     input_percentages = torch.FloatTensor(len(batch))
 
     targets = torch.zeros(len(batch), max_trg_len).long()
-    target_transcripts = torch.zeros(len(batch), max_trg_transcript_len).long()
     target_sizes = torch.IntTensor(len(batch))
-
-    langs = torch.zeros(len(batch)).long()
-    lang_names = []
 
     for x in range(len(batch)):
         sample = batch[x]
         input_data = sample[0]
         target = sample[1]
-        target_transcript = sample[2]
-        lang_id = sample[3]
-        lang_name = sample[4]
         seq_length = input_data.size(1)
         input_sizes[x] = seq_length
         inputs[x][0].narrow(1, 0, seq_length).copy_(input_data)
         input_percentages[x] = seq_length / float(max_seq_len)
         target_sizes[x] = len(target)
         targets[x][:len(target)] = torch.IntTensor(target)
-        target_transcripts[x][:len(target_transcript)] = torch.IntTensor(target_transcript)
-        langs[x] = lang_id
-        lang_names.append(lang_name)
 
     # print(">", targets[0], langs, lang_names)
     # print(target_transcripts)
-    return inputs, targets, target_transcripts, input_percentages, input_sizes, target_sizes, langs, lang_names
+    return inputs, targets, input_percentages, input_sizes, target_sizes
 
 
 class AudioDataLoader(DataLoader):

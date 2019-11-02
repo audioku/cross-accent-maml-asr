@@ -178,14 +178,13 @@ def init_transformer_model(args, vocab, train=True, is_factorized=False, r=100):
     encoder = Encoder(num_enc_layers, num_heads=num_heads, dim_model=dim_model, dim_key=dim_key, dim_value=dim_value, dim_input=dim_input, dim_inner=dim_inner, src_max_length=src_max_len, dropout=dropout, is_factorized=is_factorized, r=r)
     decoder = Decoder(vocab, num_layers=num_dec_layers, num_heads=num_heads, dim_emb=dim_emb, dim_model=dim_model, dim_inner=dim_inner, dim_key=dim_key, dim_value=dim_value, trg_max_length=tgt_max_len, dropout=dropout, emb_trg_sharing=emb_trg_sharing, is_factorized=is_factorized, r=r)
     decoder = decoder if train else decoder
-    model = Transformer(encoder, decoder, feat_extractor=feat_extractor, train=train)
+    model = Transformer(encoder, decoder, vocab, feat_extractor=feat_extractor, train=train)
 
     return model
 
 def post_process(string, vocab):
     special_token_list = vocab.special_token_list
     for i in range(len(special_token_list)):
-        if special_token_list[i] != vocab.PAD_TOKEN:
-            string = string.replace(special_token_list[i],"")
+        string = string.replace(special_token_list[i],"")
     string = string.replace("▁"," ")
     return string
