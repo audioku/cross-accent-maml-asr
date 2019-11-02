@@ -181,14 +181,14 @@ class ChineseEnglishTokenizer(PreTrainedTokenizer):
                 j = i + 1
                 while j < len(bytes_rep):
                     if isinstance(bytes_rep[j], int):
-                        text_list.append(''.join(bytes_rep[i:j]))
+                        text_list.append(' '.join(bytes_rep[i:j]))
                         i = j
                         break
                     else:
                         j += 1
 
                 if i != j: # We reach end of string without any latin character
-                    text_list.append(''.join(bytes_rep[i:]))
+                    text_list.append(' '.join(bytes_rep[i:]))
                     break
         return ' '.join(text_list)
     
