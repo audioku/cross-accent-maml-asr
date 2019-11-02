@@ -181,14 +181,14 @@ class ChineseEnglishTokenizer(PreTrainedTokenizer):
                 j = i + 1
                 while j < len(bytes_rep):
                     if isinstance(bytes_rep[j], int):
-                        text_list.append(''.join(bytes_rep[i:j]))
+                        text_list.append(' '.join(bytes_rep[i:j]))
                         i = j
                         break
                     else:
                         j += 1
 
                 if i != j: # We reach end of string without any latin character
-                    text_list.append(''.join(bytes_rep[i:]))
+                    text_list.append(' '.join(bytes_rep[i:]))
                     break
         return ' '.join(text_list)
     
@@ -223,6 +223,7 @@ if __name__ == '__main__':
         "然后 我 要 讲 的 是 他们 不 是 每 次 都 找 乱七八糟 的 人 以前 是 找 真的 那 种 怪怪 的 人 可是 现在 主题 越 做 越 普遍 了 就是 做 好像 我 猜 的 那 种 人 了",
         "I wanna be the very best like noone ever was!!"
     ]
+    
     for text in texts:
         enc = cn_en_tokenizer.encode(text)
         dec = cn_en_tokenizer.decode(enc)
