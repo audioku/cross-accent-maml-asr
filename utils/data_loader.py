@@ -13,7 +13,6 @@ from torch.utils.data import DataLoader
 from torch.utils.data import Dataset
 from torch.utils.data.sampler import Sampler
 
-from utils import constant
 from utils.audio import load_audio, get_audio_length, audio_with_sox, augment_audio_with_sox, load_randomly_augmented_audio
 import logging
 
@@ -102,7 +101,7 @@ class SpectrogramParser(AudioParser):
         raise NotImplementedError
 
 class LogFBankDataset(Dataset):
-    def __init__(self, audio_conf, manifest_filepath_list, label2id, normalize=False, augment=False, input_type="char"):
+    def __init__(self, vocab, args, audio_conf, manifest_filepath_list, normalize=False, augment=False, input_type="char", is_train=False):
         """
         Dataset that loads tensors via a csv containing file paths to audio files and transcripts separated by
         a comma. Each new line is a different sample. Example below:
@@ -125,15 +124,14 @@ class LogFBankDataset(Dataset):
             self.ids_list.append(ids)
             self.max_size = max(len(ids), self.max_size)
 
-        self.max_size = self.max_size * len(lang_list)
+        self.max_size = self.max_size * len(manifest_filepath_list)
         print("max_size:", self.max_size)
 
         print("input_type:", input_type)
         self.input_type = input_type
         self.manifest_filepath_list = manifest_filepath_list
-        self.label2id = label2id
-        self.lang_list = lang_list
         self.normalize = normalize
+        self.vocab = vocab
 
         if self.input_type == "bpe":
             self.bpeemb_list = []
@@ -144,15 +142,15 @@ class LogFBankDataset(Dataset):
 
     def __getitem__(self, index):
         # lang_id = random.randint(0, len(self.ids_list)-1)
-        lang_id = index % len(self.lang_list)
-        sample_id = index // len(self.lang_list)
+        lang_id = index % len(self.manifest_filepath_list)
+        sample_id = index // len(self.manifest_filepath_list)
         ids = self.ids_list[lang_id]
         sample = ids[sample_id % len(ids)]
         # print(lang_id, sample_id)
         audio_path, transcript_path = sample[0], sample[1]
         feat = self.parse_audio(audio_path)
-        transcript = self.parse_transcript(transcript_path, lang_id=lang_id)
-        return feat, transcript, lang_id, self.lang_list[lang_id]
+        transcript = self.parse_transcript(transcript_path)
+        return feat, transcript
 
     def parse_audio(self, path):
         (rate,sig) = wav.read(path)
@@ -166,24 +164,24 @@ class LogFBankDataset(Dataset):
             fbank_feat.div_(std)
         return fbank_feat
 
-    def parse_transcript(self, transcript_path, lang_id=0):
+    def parse_transcript(self, transcript_path):
         with open(transcript_path, 'r', encoding='utf8') as transcript_file:
             transcript = " " + transcript_file.read().replace('\n', '').lower()
 
-        if self.input_type == "bpe":
-            bpes = self.bpeemb_list[lang_id].encode(transcript)
-            transcript = []
-            for i in range(len(bpes)):
-                transcript = transcript + [bpes[i]]
+        # if self.input_type == "bpe":
+        #     bpes = self.bpeemb_list[lang_id].encode(transcript)
+        #     transcript = []
+        #     for i in range(len(bpes)):
+        #         transcript = transcript + [bpes[i]]
 
-        transcript = list(filter(None, [self.label2id.get(x) for x in list(transcript)]))
+        transcript = list(filter(None, [self.vocab.label2id.get(x) for x in list(transcript)]))
         return transcript
 
     def __len__(self):
         return self.max_size
 
 class SpectrogramDataset(Dataset, SpectrogramParser):
-    def __init__(self, audio_conf, manifest_filepath_list, src_label2id, trg_label2id, normalize=False, augment=False, input_type="char", is_train=False):
+    def __init__(self, vocab, args, audio_conf, manifest_filepath_list, normalize=False, augment=False, input_type="char", is_train=False):
         """
         Dataset that loads tensors via a csv containing file paths to audio files and transcripts separated by
         a comma. Each new line is a different sample. Example below:
@@ -198,6 +196,8 @@ class SpectrogramDataset(Dataset, SpectrogramParser):
         self.max_size = 0
         self.ids_list = []
         self.is_train = is_train
+        self.args = args
+        self.vocab = vocab
 
         for i in range(len(manifest_filepath_list)):
             manifest_filepath = manifest_filepath_list[i]
@@ -221,25 +221,12 @@ class SpectrogramDataset(Dataset, SpectrogramParser):
         print("input_type:", input_type)
         self.input_type = input_type
         self.manifest_filepath_list = manifest_filepath_list
-        self.src_label2id = src_label2id
-        self.trg_label2ids = trg_label2ids
 
-        self.lang_list = lang_list
-        self.all_lang_list = all_lang_list
-        self.all_lang2id, self.all_id2lang = {}, {}
-
-        for i in range(len(self.all_lang_list)):
-            self.all_lang2id[self.all_lang_list[i]] = i
-            self.all_id2lang[i] = self.all_lang_list[i]
-
-        print(self.all_lang2id)
-        print(self.all_lang_list, self.lang_list)
-
-        if self.input_type == "bpe":
-            self.bpeemb_list = []
-            for i in range(len(self.lang_list)):
-                lang = self.lang_list[i].replace("<","").replace(">","").lower()
-                self.bpeemb_list.append(BPEmb(lang=lang, vs=1000))
+        # if self.input_type == "bpe":
+        #     self.bpeemb_list = []
+        #     for i in range(len(self.lang_list)):
+        #         lang = self.lang_list[i].replace("<","").replace(">","").lower()
+        #         self.bpeemb_list.append(BPEmb(lang=lang, vs=1000))
         # elif self.input_type == "ipa":
         #     self.ipa_list = []
         #     for i in range(len(self.lang_list)):
@@ -251,53 +238,39 @@ class SpectrogramDataset(Dataset, SpectrogramParser):
 
     def __getitem__(self, index):
         if self.is_train:
-            # lang_id = random.randint(0, len(self.ids_list)-1)
-            lang_id = index % len(self.lang_list)
-            sample_id = index // len(self.lang_list)
-            ids = self.ids_list[lang_id]
-            # sample = ids[index % len(ids)]
+            manifest_id = index % len(self.manifest_filepath_list)
+            sample_id = index // len(self.manifest_filepath_list)
+            ids = self.ids_list[manifest_id]
             sample = ids[sample_id % len(ids)]
-            # print(lang_id, sample_id)
 
             audio_path, transcript_path = sample[0], sample[1]
-            spect = self.parse_audio(audio_path)[:,:constant.args.src_max_len]
-            transcript, target_transcript = self.parse_transcript(transcript_path, lang_id=lang_id)
+            spect = self.parse_audio(audio_path)[:,:self.args.src_max_len]
+            transcript, target_transcript = self.parse_transcript(transcript_path)
         else: # valid or test
             ids = self.ids_list[0]
             sample = ids[index % len(ids)]
-            
-            lang_id = 0
-            lang_name = self.lang_list[0]
-            if lang_name in self.all_lang2id:
-                lang_id = self.all_lang2id[lang_name]
  
             audio_path, transcript_path = sample[0], sample[1]
-            spect = self.parse_audio(audio_path)[:,:constant.args.src_max_len]
-            transcript, target_transcript = self.parse_transcript(transcript_path, lang_id=lang_id)
-        return spect, transcript, target_transcript, lang_id, self.all_lang_list[lang_id]
+            spect = self.parse_audio(audio_path)[:,:self.args.src_max_len]
+            transcript, target_transcript = self.parse_transcript(transcript_path)
+        return spect, transcript, target_transcript
 
-    def parse_transcript(self, transcript_path, lang_id=0):
+    def parse_transcript(self, transcript_path):
         if self.input_type == "char":
             with open(transcript_path, 'r', encoding='utf8') as transcript_file:
                 cur_transcript = " " + transcript_file.read().replace('\n', '').lower()
         elif self.input_type == "ipa":
             cur_transcript = np.load(transcript_path)
-        elif self.input_type == "bpe":
-            with open(transcript_path, 'r', encoding='utf8') as transcript_file:
-                cur_transcript = " " + transcript_file.read().replace('\n', '').lower()
-            bpes = self.bpeemb_list[lang_id].encode(cur_transcript)
-            cur_transcript = []
-            for i in range(len(bpes)):
-                cur_transcript = cur_transcript + [bpes[i]]
+        # elif self.input_type == "bpe":
+        #     with open(transcript_path, 'r', encoding='utf8') as transcript_file:
+        #         cur_transcript = " " + transcript_file.read().replace('\n', '').lower()
+        #     bpes = self.bpeemb_list[lang_id].encode(cur_transcript)
+        #     cur_transcript = []
+        #     for i in range(len(bpes)):
+        #         cur_transcript = cur_transcript + [bpes[i]]
 
-        transcript = list(filter(None, [self.src_label2id.get(x) for x in list(cur_transcript)]))
-        
-        # print(">", lang_id)
-        # print(self.trg_label2ids)
-        if len(self.trg_label2ids) == 1:
-            lang_id = 0
-        # print(lang_id)
-        target_transcript = list(filter(None, [self.trg_label2ids[lang_id].get(x) for x in list(cur_transcript)]))
+        transcript = list(filter(None, [self.vocab.label2id.get(x) for x in list(cur_transcript)]))
+        target_transcript = list(filter(None, [self.vocab.label2id.get(x) for x in list(cur_transcript)]))
         return transcript, target_transcript
 
     def __len__(self):

@@ -9,13 +9,12 @@ import torch
 import torch.nn as nn
 import numpy as np
 
-from utils.data import Vocab
 from torchsummary import summary
 from torch.autograd import Variable
 from trainer.asr.trainer import Trainer
+from utils.data import Vocab
 from utils.data_loader import SpectrogramDataset, LogFBankDataset, AudioDataLoader, BucketingSampler
-from utils.functions import save_model, load_model, init_transformer_model, init_deepspeech_model, init_las_model, init_optimizer, compute_num_params, generate_labels
-from utils.parallel import DataParallel
+from utils.functions import save_model, load_model, init_transformer_model, init_optimizer, compute_num_params, generate_labels
 
 parser = argparse.ArgumentParser(description='Transformer ASR training')
 parser.add_argument('--model', default='TRFS', type=str, help="")
@@ -107,9 +106,6 @@ parser.add_argument('--is-factorized', action='store_true', help="is factorized.
 parser.add_argument('--r', default=100, type=int, help='rank')
 parser.add_argument('--dropout', default=0.1, type=float, help='Dropout')
 
-# Parallelize model
-parser.add_argument('--parallel', action='store_true', help='Parallelize the model')
-
 # shuffle
 parser.add_argument('--shuffle', action='store_true', help='Shuffle')
 
@@ -166,18 +162,18 @@ if __name__ == '__main__':
         vocab.add_label(label)
 
     if args.feat == "spectrogram":
-        train_data = SpectrogramDataset(audio_conf, manifest_filepath_list=args.train_manifest_list, vocab=vocab, normalize=True, augment=args.augment, input_type=args.input_type, is_train=True)
+        train_data = SpectrogramDataset(vocab, args, audio_conf, manifest_filepath_list=args.train_manifest_list, normalize=True, augment=args.augment, input_type=args.input_type, is_train=True)
     elif args.feat == "logfbank":
-        train_data = LogFBankDataset(audio_conf, manifest_filepath_list=args.train_manifest_list, vocab=vocab, normalize=True, augment=args.augment, input_type=args.input_type, is_train=True)
+        train_data = LogFBankDataset(vocab, args, audio_conf, manifest_filepath_list=args.train_manifest_list, normalize=True, augment=args.augment, input_type=args.input_type, is_train=True)
     train_sampler = BucketingSampler(train_data, batch_size=args.batch_size)
     train_loader = AudioDataLoader(train_data, num_workers=args.num_workers, batch_sampler=train_sampler)
 
     valid_loader_list, test_loader_list = [], []
     for i in range(len(args.valid_manifest_list)):
         if args.feat == "spectrogram":
-            valid_data = SpectrogramDataset(audio_conf, manifest_filepath_list=[args.valid_manifest_list[i]], vocab=vocab, normalize=True, augment=args.augment, input_type=args.input_type)
+            valid_data = SpectrogramDataset(vocab, args, audio_conf, manifest_filepath_list=[args.valid_manifest_list[i]], normalize=True, augment=args.augment, input_type=args.input_type)
         elif args.feat == "logfbank":
-            valid_data = LogFBankDataset(audio_conf, manifest_filepath_list=[args.valid_manifest_list[i]], vocab=vocab, normalize=True, augment=False, input_type=args.input_type)
+            valid_data = LogFBankDataset(vocab, args, audio_conf, manifest_filepath_list=[args.valid_manifest_list[i]], normalize=True, augment=False, input_type=args.input_type)
         valid_sampler = BucketingSampler(valid_data, batch_size=args.batch_size)
         valid_loader = AudioDataLoader(valid_data, num_workers=args.num_workers)
         valid_loader_list.append(valid_loader)
@@ -187,7 +183,7 @@ if __name__ == '__main__':
     loaded_args = None
     if args.continue_from != "":
         logging.info("Continue from checkpoint:" + args.continue_from)
-        model, opt, epoch, metrics, loaded_args, vocab = load_model(args.continue_from)
+        model, vocab, opt, epoch, metrics, loaded_args = load_model(args.continue_from)
         start_epoch = (epoch)  # index starts from zero
         verbose = args.verbose
     else:
@@ -202,21 +198,10 @@ if __name__ == '__main__':
     if USE_CUDA:
         model = model.cuda()
 
-    # Parallelize the batch
-    if args.parallel:
-        device_ids = args.device_ids
-        model = DataParallel(model, device_ids=device_ids)
-    else:
-        if loaded_args != None:
-            if loaded_args.parallel:
-                logging.info("unwrap from DataParallel")
-                model = model.module
-
     logging.info(model)
     num_epochs = args.epochs
 
-    print("Parameters: {}(trainable), {}(non-trainable)".format(
-            compute_num_params(model)[0], compute_num_params(model)[1]))
+    print("Parameters: {}(trainable), {}(non-trainable)".format(compute_num_params(model)[0], compute_num_params(model)[1]))
 
     trainer = Trainer()
-    trainer.train(model, train_loader, train_sampler, valid_loader_list, special_token_list, opt, loss_type, start_epoch, num_epochs, src_label2id, src_id2label, trg_label2id, trg_id2label, metrics, early_stop=args.early_stop, is_accu_loss=args.is_accu_loss)
+    trainer.train(model, vocab, train_loader, train_sampler, valid_loader_list, opt, loss_type, start_epoch, num_epochs, args, metrics, early_stop=args.early_stop)

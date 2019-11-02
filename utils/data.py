@@ -1,10 +1,15 @@
 class Vocab(object):
     def __init__(self):
-        special_token_list = ["<PAD>","<SOS>","<EOS>","<OOV>"]
+        self.PAD_TOKEN = "<PAD>"
+        self.SOS_TOKEN = "<SOS>"
+        self.EOS_TOKEN = "<EOS>"
+        self.OOV_TOKEN = "<OOV>"
+
+        self.special_token_list = [self.PAD_TOKEN, self.SOS_TOKEN, self.EOS_TOKEN, self.OOV_TOKEN]
         self.token2id, self.id2token = {}, []
         self.label2id, self.id2label = {}, []
 
-        for token in special_token_list:
+        for token in self.special_token_list:
             self.add_token(token)
             self.add_label(token)
 
