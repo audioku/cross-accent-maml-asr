@@ -1,1 +1,1 @@
-from contextualized_multilingual_gpt2 import ContextualizedMultilingualGPT2
+from cpt2 import CPT2LMHeadModel, CPT2Model

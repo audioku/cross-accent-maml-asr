@@ -402,7 +402,7 @@ if __name__ == '__main__':
         result = cpt2(q, labels=y)
         loss = result[0]
         
-        print('result', result[0])
+        print('loss',loss])
 
         optimizer.zero_grad()
         loss.backward()
@@ -416,7 +416,7 @@ if __name__ == '__main__':
         result = cpt2(q, k, k,labels=y)
         loss = result[0]
         
-        print('result', result[0])
+        print('loss',loss])
 
         optimizer.zero_grad()
         loss.backward()
