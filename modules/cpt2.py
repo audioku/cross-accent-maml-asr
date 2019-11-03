@@ -329,10 +329,10 @@ class CPT2LMHeadModel(GPT2LMHeadModel):
         self.init_weights()
         self.tie_weights()
 
-    def add_chinese_embedding(self, bert_cn_embedding):
-        vocab_size = self.vocab_size + bert_cn_embedding.weight.shape[0]
+    def extend_embedding(self, embedding_layer):
+        vocab_size = self.vocab_size + embedding_layer.weight.shape[0]
         en_weights = self.transformer.wte.weight
-        cn_weights = bert_cn_embedding.weight
+        cn_weights = embedding_layer.weight
         
         self.lm_head = nn.Linear(self.n_embd, vocab_size, bias=False)
         self.transformer.wte = nn.Embedding(vocab_size, self.n_embd)
@@ -442,9 +442,10 @@ if __name__ == '__main__':
     print('cpt2.lm_head.weight.shape', cpt2.lm_head.weight.shape)
     print('self.transformer.wte.weight.shape', cpt2.transformer.wte.weight.shape)
     
+    cpt2 = CPT2LMHeadModel.from_pretrained('distilgpt2')
     bert_model = BertModel.from_pretrained('bert-base-chinese')
     bert_word_embedding = bert_model.embeddings.word_embeddings
-    cpt2.add_chinese_embedding(bert_word_embedding)
+    cpt2.extend_embedding(bert_word_embedding)
     
     print('=AFTER=')
     print('cpt2.lm_head.weight.shape', cpt2.lm_head.weight.shape)
