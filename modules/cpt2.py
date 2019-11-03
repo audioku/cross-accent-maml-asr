@@ -438,12 +438,12 @@ if __name__ == '__main__':
         optimizer.step()
         
     # Test BERT Embeddine
-    bert_model = BertModel.from_pretrained('bert-base-chinese')
-    bert_word_embedding = bert_model.embeddings.word_embeddings
     print('=BEFORE=')
     print('cpt2.lm_head.weight.shape', cpt2.lm_head.weight.shape)
     print('self.transformer.wte.weight.shape', cpt2.transformer.wte.weight.shape)
     
+    bert_model = BertModel.from_pretrained('bert-base-chinese')
+    bert_word_embedding = bert_model.embeddings.word_embeddings
     cpt2.add_chinese_embedding(bert_word_embedding)
     
     print('=AFTER=')
