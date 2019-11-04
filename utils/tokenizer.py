@@ -193,7 +193,7 @@ class ChineseEnglishTokenizer(PreTrainedTokenizer):
         return ' '.join(text_list)
     
 if __name__ == '__main__':
-    gpt2_en_tokenizer = GPT2Tokenizer.from_pretrained('gpt2')
+    gpt2_en_tokenizer = GPT2Tokenizer.from_pretrained('distilgpt2')
     bert_cn_tokenizer = BertTokenizer.from_pretrained('bert-base-chinese')
     cn_en_tokenizer = ChineseEnglishTokenizer(gpt2_en_tokenizer, bert_cn_tokenizer)
     
@@ -233,3 +233,5 @@ if __name__ == '__main__':
         print(enc)
         print('====')
         print(dec)
+        print('====')
+        print(cn_en_tokenizer.gpt2_en_tokenizer.encoder['<|endoftext|>'], cn_en_tokenizer.eos_token_id)

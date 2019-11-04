@@ -79,11 +79,12 @@ class ContextualAttention(nn.Module):
         
         if attention_mask is not None:
             # Apply the attention mask
-            w = w + attention_mask
+            # w = w + attention_mask
+            w.masked_fill_(attention_mask, float('-inf'))
 
         if apply_future_mask:
             future_mask = ContextualAttention._get_future_mask(w.shape[-2:], w.device).unsqueeze(0).unsqueeze(0).bool()
-            w.masked_fill_(future_mask, float('-inf'))            
+            w.masked_fill_(future_mask, float('-inf'))
 
         w = nn.Softmax(dim=-1)(w)
         w = self.attn_dropout(w)
@@ -195,11 +196,12 @@ class ContextualBlock(nn.Module):
         return outputs  # x, present, (attentions)
 
 class CPT2Model(GPT2Model):
-    def __init__(self, config):
+    def __init__(self, config, mha_block):
         super(CPT2Model, self).__init__(config)
         self.output_hidden_states = config.output_hidden_states
         self.output_attentions = config.output_attentions
         self.output_past = config.output_past
+        self.mha_block = mha_block
 
         self.wte = nn.Embedding(config.vocab_size, config.n_embd)
         self.wpe = nn.Embedding(config.n_positions, config.n_embd)
@@ -283,14 +285,21 @@ class CPT2Model(GPT2Model):
         presents = ()
         all_attentions = []
         all_hidden_states = ()
+        # TODO: Configure / specify layer for injecting key & value (MHA)
         for i, (block, layer_past) in enumerate(zip(self.h, past)):
             if self.output_hidden_states:
                 all_hidden_states = all_hidden_states + (hidden_states.view(*output_shape),)
 
-            outputs = block(hidden_states, key, value,
-                            layer_past=layer_past,
-                            attention_mask=attention_mask,
-                            head_mask=head_mask[i])
+            if self.mha_block[i] == 0:
+                outputs = block(hidden_states, None, None,
+                                layer_past=layer_past,
+                                attention_mask=attention_mask,
+                                head_mask=head_mask[i])
+            else:
+                outputs = block(hidden_states, key, value,
+                                layer_past=layer_past,
+                                attention_mask=attention_mask,
+                                head_mask=head_mask[i])
 
             hidden_states, present = outputs[:2]
             if self.output_past:
@@ -349,8 +358,7 @@ class CPT2LMHeadModel(GPT2LMHeadModel):
         print('wte_cn_0', self.transformer.wte.weight[self.vocab_size,:10])
         print('lm_head_cn_0', self.lm_head.weight[self.vocab_size,:10])
 
-    def forward(self, input_ids, key=None, value=None, past=None, attention_mask=None, token_type_ids=None, position_ids=None, head_mask=None,
-                labels=None):
+    def forward(self, input_ids, key=None, value=None, past=None, attention_mask=None, token_type_ids=None, position_ids=None, head_mask=None):
         transformer_outputs = self.transformer(input_ids, key, value,
                                                past=past,
                                                attention_mask=attention_mask,
@@ -358,22 +366,8 @@ class CPT2LMHeadModel(GPT2LMHeadModel):
                                                position_ids=position_ids,
                                                head_mask=head_mask)
         hidden_states = transformer_outputs[0]
-
         lm_logits = self.lm_head(hidden_states)
-
-        outputs = (lm_logits,) + transformer_outputs[1:]
-        if labels is not None:
-            # Shift so that tokens < n predict n
-            shift_logits = lm_logits[..., :-1, :].contiguous()
-            shift_labels = labels[..., 1:].contiguous()
-            # Flatten the tokens
-            loss_fct = nn.CrossEntropyLoss(ignore_index=-1)
-            loss = loss_fct(shift_logits.view(-1, shift_logits.size(-1)),
-                            shift_labels.view(-1))
-            outputs = (loss,) + outputs
-
-        return outputs  # (loss), lm_logits, presents, (all hidden_states), (attentions)
-    
+        return lm_logits
 
 if __name__ == '__main__':
     from attrdict import AttrDict

@@ -34,7 +34,7 @@ class Trainer():
 
         # handling the last batch
         seq_length = pred.size(1)
-        sizes = Variable(src_percentages.mul_(int(seq_length)).int(), requires_grad=False)
+        sizes = src_percentages.mul_(int(seq_length)).int()
 
         loss, num_correct = calculate_metrics(pred, gold, vocab, input_lengths=sizes, target_lengths=trg_lengths, smoothing=smoothing, loss_type=loss_type)
 

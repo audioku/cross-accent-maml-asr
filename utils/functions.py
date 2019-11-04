@@ -6,7 +6,7 @@ import logging
 import numpy as np
 
 from modules import CPT2LMHeadModel
-from models.asr.transformer import Transformer, Encoder, Decoder
+from models.asr.transformer_cpt2 import TransformerCPT2, Encoder, Decoder
 from utils.optimizer import NoamOpt, AnnealingOpt
 
 def generate_labels(labels, special_token_list):
@@ -183,7 +183,7 @@ def init_transformer_model(args, vocab, train=True, is_factorized=False, r=100):
 
     return model
 
-def init_cpt2_model(args, vocab, train=True, is_factorized=False, r=100):
+def init_cpt2_model(args, tokenizer, pad_id, sos_id, eos_id, vocab, train=True, is_factorized=False, r=100, mha_block=[0,0,1,1,0,0]):
     """
     Initiate a new transformer object
     """
@@ -225,12 +225,12 @@ def init_cpt2_model(args, vocab, train=True, is_factorized=False, r=100):
     encoder = Encoder(num_enc_layers, num_heads=num_heads, dim_model=dim_model, dim_key=dim_key, dim_value=dim_value, dim_input=dim_input, dim_inner=dim_inner, src_max_length=src_max_len, dropout=dropout, is_factorized=is_factorized, r=r)
 
     # CPT2
-    cpt2 = CPT2LMHeadModel.from_pretrained('distilgpt2')
+    cpt2 = CPT2LMHeadModel.from_pretrained('distilgpt2', mha_block=mha_block)
     bert_model = BertModel.from_pretrained('bert-base-chinese')
     bert_word_embedding = bert_model.embeddings.word_embeddings
     cpt2.extend_embedding(bert_word_embedding)
     
-    model = Transformer(encoder, cpt2, vocab, feat_extractor=feat_extractor, train=train)
+    model = TransformerCPT2(encoder, cpt2, tokenizer, pad_id, sos_id, eos_id, vocab, feat_extractor=feat_extractor, train=train)
 
     return model
 
