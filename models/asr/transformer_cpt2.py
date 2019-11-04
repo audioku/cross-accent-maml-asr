@@ -21,10 +21,10 @@ class TransformerCPT2(nn.Module):
         decoder: Decoder object
     """
 
-    def __init__(self, encoder, decoder, vocab, feat_extractor='vgg_cnn', train=True, is_factorized=False, r=100):
+    def __init__(self, encoder, cpt2, vocab, feat_extractor='vgg_cnn', train=True, is_factorized=False, r=100):
         super(TransformerCPT2, self).__init__()
         self.encoder = encoder
-        self.decoder = decoder
+        self.decoder = cpt2
         self.vocab = vocab
 
         self.feat_extractor = feat_extractor
@@ -96,7 +96,7 @@ class TransformerCPT2(nn.Module):
         padded_input = padded_input.transpose(1, 2).contiguous()  # BxTxH
         
         encoder_padded_outputs, _ = self.encoder(padded_input, input_lengths)
-        pred_list, gold_list, *_ = self.decoder(padded_target, encoder_padded_outputs, input_lengths)
+        pred_list, gold_list, *_ = self.decoder(padded_target, encoder_padded_outputs, encoder_padded_outputs)
 
         # hyp_list = []
         # print(pred_list.size())
