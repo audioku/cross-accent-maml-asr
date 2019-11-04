@@ -22,6 +22,7 @@ import torch.nn.functional as F
 
 from transformers.modeling_utils import PreTrainedModel, Conv1D, prune_conv1d_layer, SequenceSummary
 from transformers.modeling_gpt2 import GPT2LMHeadModel, GPT2Model, MLP, gelu
+from transformers.modeling_bert import BertModel, BertEmbeddings
 
 class ContextualAttention(nn.Module):
     @classmethod
@@ -322,17 +323,31 @@ class CPT2LMHeadModel(GPT2LMHeadModel):
         super(CPT2LMHeadModel, self).__init__(config)
         self.transformer = CPT2Model(config)
         self.lm_head = nn.Linear(config.n_embd, config.vocab_size, bias=False)
+        self.n_embd = config.n_embd
+        self.vocab_size = config.vocab_size
 
         self.init_weights()
         self.tie_weights()
 
-    def tie_weights(self):
-        """ Make sure we are sharing the input and output embeddings.
-            Export to TorchScript can't handle parameter sharing so we are cloning them instead.
-        """
-        self._tie_or_clone_weights(self.lm_head,
-                                   self.transformer.wte)
+    def extend_embedding(self, embedding_layer):
+        vocab_size = self.vocab_size + embedding_layer.weight.shape[0]
+        en_weights = self.transformer.wte.weight
+        cn_weights = embedding_layer.weight
+        
+        self.lm_head = nn.Linear(self.n_embd, vocab_size, bias=False)
+        self.transformer.wte = nn.Embedding(vocab_size, self.n_embd)
+        self.transformer.wte.weight.data[:self.vocab_size,:] = en_weights
+        self.transformer.wte.weight.data[self.vocab_size:,:] = cn_weights
+        
+        self.tie_weights()
+        
+        print('en_weights', en_weights[0,:10])
+        print('wte_en_0', self.transformer.wte.weight[0,:10])
+        print('lm_head_en_0', self.lm_head.weight[0,:10])
 
+        print('cn_weights', cn_weights[0,:10])
+        print('wte_cn_0', self.transformer.wte.weight[self.vocab_size,:10])
+        print('lm_head_cn_0', self.lm_head.weight[self.vocab_size,:10])
 
     def forward(self, input_ids, key=None, value=None, past=None, attention_mask=None, token_type_ids=None, position_ids=None, head_mask=None,
                 labels=None):
@@ -362,8 +377,8 @@ class CPT2LMHeadModel(GPT2LMHeadModel):
 
 if __name__ == '__main__':
     from attrdict import AttrDict
-    nx = 8 # dmodel
-    n_ctx = 512 # what?
+    nx = 8
+    n_ctx = 512
     config = AttrDict({
         'output_attentions': False,
         'n_head' : 2,
@@ -398,11 +413,11 @@ if __name__ == '__main__':
     print('Test CPT2 self-attention')
     cpt2 = CPT2LMHeadModel.from_pretrained('distilgpt2')
     optimizer = torch.optim.Adam(cpt2.parameters())
-    for i in range(10):
+    for i in range(3):
         result = cpt2(q, labels=y)
         loss = result[0]
         
-        print('loss',loss])
+        print('loss',loss)
 
         optimizer.zero_grad()
         loss.backward()
@@ -412,12 +427,27 @@ if __name__ == '__main__':
     print('Test CPT2 non self-attention')
     cpt2 = CPT2LMHeadModel.from_pretrained('distilgpt2')
     optimizer = torch.optim.Adam(cpt2.parameters())
-    for i in range(10):
+    for i in range(3):
         result = cpt2(q, k, k,labels=y)
         loss = result[0]
         
-        print('loss',loss])
+        print('loss',loss)
 
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
+        
+    # Test BERT Embeddine
+    print('=BEFORE=')
+    print('cpt2.lm_head.weight.shape', cpt2.lm_head.weight.shape)
+    print('self.transformer.wte.weight.shape', cpt2.transformer.wte.weight.shape)
+    
+    cpt2 = CPT2LMHeadModel.from_pretrained('distilgpt2')
+    bert_model = BertModel.from_pretrained('bert-base-chinese')
+    bert_word_embedding = bert_model.embeddings.word_embeddings
+    cpt2.extend_embedding(bert_word_embedding)
+    
+    print('=AFTER=')
+    print('cpt2.lm_head.weight.shape', cpt2.lm_head.weight.shape)
+    print('self.transformer.wte.weight.shape', cpt2.transformer.wte.weight.shape)
+    
