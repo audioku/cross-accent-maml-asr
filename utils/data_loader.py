@@ -273,7 +273,7 @@ class SpectrogramDataset(Dataset, SpectrogramParser):
         return self.max_size
 
 class CPT2LogFBankDataset(Dataset):
-    def __init__(self, tokenizer, args, audio_conf, manifest_filepath_list, normalize=False, augment=False, input_type="char", is_train=False):
+    def __init__(self, tokenizer, args, audio_conf, manifest_filepath_list, normalize=False, augment=False, is_train=False):
         """
         Dataset that loads tensors via a csv containing file paths to audio files and transcripts separated by
         a comma. Each new line is a different sample. Example below:
@@ -299,18 +299,11 @@ class CPT2LogFBankDataset(Dataset):
         self.max_size = self.max_size * len(manifest_filepath_list)
         print("max_size:", self.max_size)
 
-        print("input_type:", input_type)
-        self.input_type = input_type
         self.manifest_filepath_list = manifest_filepath_list
         self.normalize = normalize
         self.tokenizer = tokenizer
 
-        if self.input_type == "bpe":
-            self.bpeemb_list = []
-            for i in range(len(self.lang_list)):
-                lang = self.lang_list[i].replace("<","").replace(">","").lower()
-                self.bpeemb_list.append(BPEmb(lang=lang, vs=1000))
-        super(LogFBankDataset, self).__init__()
+        super(CPT2LogFBankDataset, self).__init__()
 
     def __getitem__(self, index):
         # lang_id = random.randint(0, len(self.ids_list)-1)
@@ -345,7 +338,7 @@ class CPT2LogFBankDataset(Dataset):
     def __len__(self):
         return self.max_size
 
-class CPT2SpectogramDataset(Dataset, SpectrogramParser):
+class CPT2SpectrogramDataset(Dataset, SpectrogramParser):
     def __init__(self, tokenizer, args, audio_conf, manifest_filepath_list, normalize=False, augment=False, is_train=False):
         """
         Dataset that loads tensors via a csv containing file paths to audio files and transcripts separated by
@@ -383,20 +376,7 @@ class CPT2SpectogramDataset(Dataset, SpectrogramParser):
             self.max_size = self.max_size
         print("max_size:", self.max_size)
 
-        print("input_type:", input_type)
-        self.input_type = input_type
         self.manifest_filepath_list = manifest_filepath_list
-
-        # if self.input_type == "bpe":
-        #     self.bpeemb_list = []
-        #     for i in range(len(self.lang_list)):
-        #         lang = self.lang_list[i].replace("<","").replace(">","").lower()
-        #         self.bpeemb_list.append(BPEmb(lang=lang, vs=1000))
-        # elif self.input_type == "ipa":
-        #     self.ipa_list = []
-        #     for i in range(len(self.lang_list)):
-        #         lang = ipa_map[self.lang_list[i].replace("<","").replace(">","").lower()]
-        #         self.ipa_list.append(epitran.Epitran(lang))
 
         super(CPT2SpectogramDataset, self).__init__(
             audio_conf, normalize, augment)
@@ -425,9 +405,10 @@ class CPT2SpectogramDataset(Dataset, SpectrogramParser):
             cur_transcript = " " + transcript_file.read().replace('\n', '').lower()
         bpes = self.tokenizer.encode(cur_transcript)
         
-        print('cur_transcript', cur_transcript)
-        print('bpes', bpes)
-        print('dec_transcript', self.tokenizer.decode(bpes))
+#         # DEBUG
+#         print('cur_transcript', cur_transcript)
+#         print('bpes', bpes)
+#         print('dec_transcript', self.tokenizer.decode(bpes))
 
         return bpes
 
@@ -469,50 +450,49 @@ class NoiseInjection(object):
         return data
 
 class AudioDataLoader(DataLoader):
-    def __init__(self, vocab, *args, **kwargs):
+    def __init__(self, pad_id, *args, **kwargs):
         super(AudioDataLoader, self).__init__(*args, **kwargs)
-        self.pad_token_id = vocab.PAD_ID
-    
-        def _collate_fn(batch):
-            def func(p):
-                return p[0].size(1)
+        self.pad_token_id = pad_id
+        self.collate_fn = self.collate_function
+        
+    def collate_function(self, batch):
+        def func(p):
+            return p[0].size(1)
 
-            def func_trg(p):
-                return len(p[1])
+        def func_trg(p):
+            return len(p[1])
 
-            def func_trg_transcript(p):
-                return len(p[2])
+        def func_trg_transcript(p):
+            return len(p[2])
 
-            # descending sorted
-            batch = sorted(batch, key=lambda sample: sample[0].size(1), reverse=True)
+        # descending sorted
+        batch = sorted(batch, key=lambda sample: sample[0].size(1), reverse=True)
 
-            max_seq_len = max(batch, key=func)[0].size(1)
-            freq_size = max(batch, key=func)[0].size(0)
-            max_trg_len = len(max(batch, key=func_trg)[1])
+        max_seq_len = max(batch, key=func)[0].size(1)
+        freq_size = max(batch, key=func)[0].size(0)
+        max_trg_len = len(max(batch, key=func_trg)[1])
 
-            inputs = torch.zeros(len(batch), 1, freq_size, max_seq_len)
-            input_sizes = torch.IntTensor(len(batch))
-            input_percentages = torch.FloatTensor(len(batch))
+        inputs = torch.zeros(len(batch), 1, freq_size, max_seq_len)
+        input_sizes = torch.IntTensor(len(batch))
+        input_percentages = torch.FloatTensor(len(batch))
 
-            targets = torch.full((len(batch), max_trg_len), self.pad_token_id).long()
-            target_sizes = torch.IntTensor(len(batch))
+        targets = torch.full((len(batch), max_trg_len), self.pad_token_id).long()
+        target_sizes = torch.IntTensor(len(batch))
 
-            for x in range(len(batch)):
-                sample = batch[x]
-                input_data = sample[0]
-                target = sample[1]
-                seq_length = input_data.size(1)
-                input_sizes[x] = seq_length
-                inputs[x][0].narrow(1, 0, seq_length).copy_(input_data)
-                input_percentages[x] = seq_length / float(max_seq_len)
-                target_sizes[x] = len(target)
-                targets[x][:len(target)] = torch.IntTensor(target)
+        for x in range(len(batch)):
+            sample = batch[x]
+            input_data = sample[0]
+            target = sample[1]
+            seq_length = input_data.size(1)
+            input_sizes[x] = seq_length
+            inputs[x][0].narrow(1, 0, seq_length).copy_(input_data)
+            input_percentages[x] = seq_length / float(max_seq_len)
+            target_sizes[x] = len(target)
+            targets[x][:len(target)] = torch.IntTensor(target)
 
-            # print(">", targets[0], langs, lang_names)
-            # print(target_transcripts)
-            return inputs, targets, input_percentages, input_sizes, target_sizes
-
-        self.collate_fn = _collate_fn
+        # print(">", targets[0], langs, lang_names)
+        # print(target_transcripts)
+        return inputs, targets, input_percentages, input_sizes, target_sizes
 
 class BucketingSampler(Sampler):
     def __init__(self, data_source, batch_size=1):

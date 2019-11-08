@@ -11,7 +11,7 @@ import numpy as np
 
 from torchsummary import summary
 from torch.autograd import Variable
-from trainer.asr.trainer import Trainer
+from trainer.asr.trainer_cpt import TrainerCPT
 from utils.data import Vocab
 from utils.data_loader import CPT2SpectrogramDataset, CPT2LogFBankDataset, AudioDataLoader, BucketingSampler
 from utils.functions import save_model, load_model, init_cpt2_model, init_optimizer, compute_num_params, generate_labels
@@ -105,9 +105,6 @@ parser.add_argument('--dropout', default=0.1, type=float, help='Dropout')
 # shuffle
 parser.add_argument('--shuffle', action='store_true', help='Shuffle')
 
-# input
-parser.add_argument('--input_type', type=str, default='char', help='char or bpe or ipa')
-
 # Post-training factorization
 parser.add_argument('--rank', default=10, type=float, help="rank")
 parser.add_argument('--factorize', action='store_true', help='factorize')
@@ -124,7 +121,6 @@ if __name__ == '__main__':
     print("TRAINING MANIFEST: ", args.train_manifest_list)
     print("VALID MANIFEST: ", args.valid_manifest_list)
     print("TEST MANIFEST: ", args.test_manifest_list)
-    print("INPUT TYPE: ", args.input_type)
     print("="*50)
 
     if args.mha_block:
@@ -168,38 +164,39 @@ if __name__ == '__main__':
     bert_cn_tokenizer = BertTokenizer.from_pretrained('bert-base-chinese')
     cn_en_tokenizer = ChineseEnglishTokenizer(gpt2_en_tokenizer, bert_cn_tokenizer)
     
-    pad_id = tokenizer.eos_token_id
-    sos_id = tokenizer.bos_token_id
-    eos_id = tokenizer.eos_token_id
+    pad_id = cn_en_tokenizer.eos_token_id
+    sos_id = cn_en_tokenizer.bos_token_id
+    eos_id = cn_en_tokenizer.eos_token_id
 
     if args.feat == "spectrogram":
-        train_data = CPT2SpectrogramDataset(tokenizer, args, audio_conf, manifest_filepath_list=args.train_manifest_list, normalize=True, augment=args.augment, input_type=args.input_type, is_train=True)
+        train_data = CPT2SpectrogramDataset(cn_en_tokenizer, args, audio_conf, manifest_filepath_list=args.train_manifest_list, normalize=True, augment=args.augment, is_train=True)
     elif args.feat == "logfbank":
-        train_data = CPT2LogFBankDataset(tokenizer, args, audio_conf, manifest_filepath_list=args.train_manifest_list, normalize=True, augment=args.augment, input_type=args.input_type, is_train=True)
+        train_data = CPT2LogFBankDataset(cn_en_tokenizer, args, audio_conf, manifest_filepath_list=args.train_manifest_list, normalize=True, augment=args.augment, is_train=True)
     train_sampler = BucketingSampler(train_data, batch_size=args.batch_size)
-    train_loader = AudioDataLoader(train_data, num_workers=args.num_workers, batch_sampler=train_sampler)
+    train_loader = AudioDataLoader(pad_id, train_data, num_workers=args.num_workers, batch_sampler=train_sampler)
 
     valid_loader_list, test_loader_list = [], []
     for i in range(len(args.valid_manifest_list)):
         if args.feat == "spectrogram":
-            valid_data = CPT2SpectrogramDataset(tokenizer, args, audio_conf, manifest_filepath_list=[args.valid_manifest_list[i]], normalize=True, augment=args.augment, input_type=args.input_type)
+            valid_data = CPT2SpectrogramDataset(cn_en_tokenizer, args, audio_conf, manifest_filepath_list=[args.valid_manifest_list[i]], normalize=True, augment=args.augment)
         elif args.feat == "logfbank":
-            valid_data = CPT2LogFBankDataset(tokenizer, args, audio_conf, manifest_filepath_list=[args.valid_manifest_list[i]], normalize=True, augment=False, input_type=args.input_type)
+            valid_data = CPT2LogFBankDataset(cn_en_tokenizer, args, audio_conf, manifest_filepath_list=[args.valid_manifest_list[i]], normalize=True, augment=False)
         valid_sampler = BucketingSampler(valid_data, batch_size=args.batch_size)
-        valid_loader = AudioDataLoader(valid_data, pad_id_token=pad_id, num_workers=args.num_workers)
+        valid_loader = AudioDataLoader(pad_id, valid_data, num_workers=args.num_workers)
         valid_loader_list.append(valid_loader)
 
     start_epoch = 0
     metrics = None
     loaded_args = None
     if args.continue_from != "":
-        logging.info("Continue from checkpoint:" + args.continue_from)
-        model, vocab, opt, epoch, metrics, loaded_args = load_model(args.continue_from)
-        start_epoch = (epoch)  # index starts from zero
+        # TODO
+#         logging.info("Continue from checkpoint:" + args.continue_from)
+#         model, vocab, opt, epoch, metrics, loaded_args = load_model(args.continue_from)
+#         start_epoch = (epoch)  # index starts from zero
         verbose = args.verbose
     else:
         if args.model == "TRFS":
-            model = init_cpt2_model(args, tokenizer, pad_id, sos_id, eos_id, vocab, is_factorized=args.is_factorized, r=args.r, mha_block=mha_block)
+            model = init_cpt2_model(args, cn_en_tokenizer, pad_id, sos_id, eos_id, vocab, is_factorized=args.is_factorized, r=args.r, mha_block=mha_block)
             opt = init_optimizer(args, model, "noam")
         else:
             logging.info("The model is not supported, check args --h")
@@ -214,5 +211,5 @@ if __name__ == '__main__':
 
     print("Parameters: {}(trainable), {}(non-trainable)".format(compute_num_params(model)[0], compute_num_params(model)[1]))
 
-    trainer = Trainer()
-    trainer.train(model, vocab, train_loader, train_sampler, valid_loader_list, opt, loss_type, start_epoch, num_epochs, args, metrics, early_stop=args.early_stop)
+    trainer = TrainerCPT(cn_en_tokenizer)
+    trainer.train(model, train_loader, train_sampler, valid_loader_list, opt, loss_type, start_epoch, num_epochs, args, metrics, early_stop=args.early_stop)

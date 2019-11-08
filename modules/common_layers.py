@@ -25,11 +25,11 @@ def pad_list_with_mask(xs, pad_value):
     max_len = max([x.size(0) for x in xs])
     pad = xs[0].new(n_batch, max_len, * xs[0].size()[1:]).fill_(pad_value)
 
-    mask = torch.ones((n_bach, max_len))
+    mask = torch.ones((n_batch, max_len), dtype=torch.bool)
     for i in range(n_batch):
         pad[i, :xs[i].size(0)] = xs[i]
         mask[i, :xs[i].size(0)] = 0
-    return pad
+    return pad, mask
 
 """ 
 Transformer common layers
