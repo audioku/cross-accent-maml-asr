@@ -28,12 +28,11 @@ class TransformerCPT2(nn.Module):
         self.tokenizer = tokenizer
         self.pad_id = pad_id
         self.sos_id = sos_id
-        self.eos = eos_id
+        self.eos_id = eos_id
 
         self.feat_extractor = feat_extractor
         self.is_factorized = is_factorized
         self.r = r
-        self.eos_id = 0 #TODO: FUCKKKK
 
         print("feat extractor:", feat_extractor)
 
@@ -89,11 +88,17 @@ class TransformerCPT2(nn.Module):
         seq_in = [torch.cat([sos, y], dim=0) for y in seq]
         seq_out = [torch.cat([y, eos], dim=0) for y in seq]
         seq_in_pad, mask = pad_list_with_mask(seq_in, self.pad_id)
-        seq_out_pad, mask = pad_list_with_mask(seq_out, self.pad_id)
+        seq_out_pad, _ = pad_list_with_mask(seq_out, self.pad_id)
+        mask = mask.to(padded_input.device)
 
+#         # DEBUG
+#         print('seq_in_pad', seq_in_pad)
+#         print('seq_out_pad', seq_out_pad)
+#         print('mask', mask)
+        
         assert seq_in_pad.size() == seq_out_pad.size()
         # print(seq_in_pad.size(), seq_out_pad.size())
-        return seq_in_pad, seq_out_pad
+        return seq_in_pad, seq_out_pad, mask
 
     def forward(self, padded_input, input_lengths, padded_target, verbose=False):
         """
@@ -117,26 +122,30 @@ class TransformerCPT2(nn.Module):
         encoder_padded_outputs, _ = self.encoder(padded_input, input_lengths)
 
         # Padded target add sos & eos
-        seq_in_pad, seq_out_pad, mask = self.preprocess(padded_input)
+        seq_in_pad, seq_out_pad, mask = self.preprocess(padded_target)
         final_decoded_output = []
 
         # Forward model
         decoder_output = self.decoder(seq_in_pad, encoder_padded_outputs, encoder_padded_outputs, attention_mask=mask)
 
         # Prepare output list
-        pred_list = []
-        gold_list = []
-        for i in range(len(decoder_output)):
-            pred_list.append(self.output_linear(decoder_output[i].unsqueeze(0)).squeeze())
-            gold_list.append(seq_out_pad[i])
+        pred_list = decoder_output
         
-        pred_list = torch.stack(pred_list, dim=0)
+        gold_list = []
+        for i in range(len(seq_out_pad)):
+            gold_list.append(seq_out_pad[i])
         gold_list = torch.stack(gold_list, dim=0)
 
         hyp_best_scores, hyp_best_ids = torch.topk(pred_list, 1, dim=2)
         hyp_list = hyp_best_ids.squeeze(2)
 
-        return pred_list, gold_list, hyp_list
+        non_pad_mask = torch.logical_not(mask)
+        
+#         # DEBUG
+#         print('gold_list', gold_list)
+#         print('hyp_list', hyp_list)
+
+        return pred_list, gold_list, hyp_list, non_pad_mask
 
     def evaluate(self, padded_input, input_lengths, padded_target, args, beam_search=False, beam_width=0, beam_nbest=0, lm=None, lm_rescoring=False, lm_weight=0.1, c_weight=1, start_token=-1, verbose=False):
         """

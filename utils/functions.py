@@ -5,9 +5,10 @@ import torch.nn as nn
 import logging
 import numpy as np
 
+from transformers import BertModel
 from modules import CPT2LMHeadModel, Encoder, Decoder
-from models.asr.transformer_cpt2 import TransformerCPT2
 from models.asr.transformer import Transformer
+from models.asr.transformer_cpt2 import TransformerCPT2
 from utils.optimizer import NoamOpt, AnnealingOpt
 
 def generate_labels(labels, special_token_list):
@@ -235,8 +236,7 @@ def init_cpt2_model(args, tokenizer, pad_id, sos_id, eos_id, vocab, train=True, 
 
     return model
 
-def post_process(string, vocab):
-    special_token_list = vocab.special_token_list
+def post_process(string, special_token_list):
     for i in range(len(special_token_list)):
         string = string.replace(special_token_list[i],"")
     string = string.replace("▁"," ")

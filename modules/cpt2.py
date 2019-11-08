@@ -90,8 +90,8 @@ class ContextualAttention(nn.Module):
         w = self.attn_dropout(w)
 
         # Mask heads if we want to
-        if head_mask is not None:
-            w = w * head_mask
+#         if head_mask is not None:
+#             w = w * head_mask
 
         outputs = [torch.matmul(w, v)]
         if self.output_attentions:
@@ -243,19 +243,11 @@ class CPT2Model(GPT2Model):
         if attention_mask is not None:
             attention_mask = attention_mask.view(-1, input_shape[-1])
             # We create a 3D attention mask from a 2D tensor mask.
-            # Sizes are [batch_size, 1, 1, to_seq_length]
+            # Sizes are [batch_size, 1, from_seq_lenght, 1]
             # So we can broadcast to [batch_size, num_heads, from_seq_length, to_seq_length]
             # this attention mask is more simple than the triangular masking of causal attention
-            # used in OpenAI GPT, we just need to prepare the broadcast dimension here.
+            # used in Genta CPT, we just need to prepare the broadcast dimension here.
             attention_mask = attention_mask.unsqueeze(1).unsqueeze(2)
-
-            # Since attention_mask is 1.0 for positions we want to attend and 0.0 for
-            # masked positions, this operation will create a tensor which is 0.0 for
-            # positions we want to attend and -10000.0 for masked positions.
-            # Since we are adding it to the raw scores before the softmax, this is
-            # effectively the same as removing these entirely.
-            attention_mask = attention_mask.to(dtype=next(self.parameters()).dtype) # fp16 compatibility
-            attention_mask = (1.0 - attention_mask) * -10000.0
 
         # Prepare head mask if needed
         # 1.0 in head_mask indicate we keep the head
@@ -285,7 +277,6 @@ class CPT2Model(GPT2Model):
         presents = ()
         all_attentions = []
         all_hidden_states = ()
-        # TODO: Configure / specify layer for injecting key & value (MHA)
         for i, (block, layer_past) in enumerate(zip(self.h, past)):
             if self.output_hidden_states:
                 all_hidden_states = all_hidden_states + (hidden_states.view(*output_shape),)
@@ -298,7 +289,7 @@ class CPT2Model(GPT2Model):
             else:
                 outputs = block(hidden_states, key, value,
                                 layer_past=layer_past,
-                                attention_mask=attention_mask,
+                                attention_mask=None,
                                 head_mask=head_mask[i])
 
             hidden_states, present = outputs[:2]
@@ -328,9 +319,9 @@ class CPT2Model(GPT2Model):
         return outputs  # last hidden state, (presents), (all hidden_states), (attentions)
                                   
 class CPT2LMHeadModel(GPT2LMHeadModel):
-    def __init__(self, config):
+    def __init__(self, config, mha_block):
         super(CPT2LMHeadModel, self).__init__(config)
-        self.transformer = CPT2Model(config)
+        self.transformer = CPT2Model(config, mha_block)
         self.lm_head = nn.Linear(config.n_embd, config.vocab_size, bias=False)
         self.n_embd = config.n_embd
         self.vocab_size = config.vocab_size
@@ -347,16 +338,18 @@ class CPT2LMHeadModel(GPT2LMHeadModel):
         self.transformer.wte = nn.Embedding(vocab_size, self.n_embd)
         self.transformer.wte.weight.data[:self.vocab_size,:] = en_weights
         self.transformer.wte.weight.data[self.vocab_size:,:] = cn_weights
+        self.vocab_size = vocab_size
         
         self.tie_weights()
         
-        print('en_weights', en_weights[0,:10])
-        print('wte_en_0', self.transformer.wte.weight[0,:10])
-        print('lm_head_en_0', self.lm_head.weight[0,:10])
+#         # DEBUG
+#         print('en_weights', en_weights[0,:10])
+#         print('wte_en_0', self.transformer.wte.weight[0,:10])
+#         print('lm_head_en_0', self.lm_head.weight[0,:10])
 
-        print('cn_weights', cn_weights[0,:10])
-        print('wte_cn_0', self.transformer.wte.weight[self.vocab_size,:10])
-        print('lm_head_cn_0', self.lm_head.weight[self.vocab_size,:10])
+#         print('cn_weights', cn_weights[0,:10])
+#         print('wte_cn_0', self.transformer.wte.weight[self.vocab_size,:10])
+#         print('lm_head_cn_0', self.lm_head.weight[self.vocab_size,:10])
 
     def forward(self, input_ids, key=None, value=None, past=None, attention_mask=None, token_type_ids=None, position_ids=None, head_mask=None):
         transformer_outputs = self.transformer(input_ids, key, value,
