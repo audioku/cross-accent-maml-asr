@@ -8,9 +8,7 @@ import kenlm
 import os
 
 from modules.common_layers import FactorizedMultiHeadAttention, PositionalEncoding, PositionwiseFeedForward, FactorizedPositionwiseFeedForward, get_subsequent_mask, get_non_pad_mask, get_attn_key_pad_mask, get_attn_pad_mask, pad_list
-
 from torch.autograd import Variable
-from utils import constant
 from utils.metrics import calculate_metrics
 
 class Transformer(nn.Module):
@@ -107,6 +105,15 @@ class Transformer(nn.Module):
         return pred_list, gold_list, hyp_list
         # except:
         #     torch.cuda.empty_cache()
+    
+    def decode_hyp(self, vocab, hyp):
+        """
+        args: 
+            hyp: list of hypothesis
+        output:
+            list of hypothesis (string)>
+        """
+        return "".join([vocab.id2label[int(x)] for x in hyp['yseq'][1:]])
 
     def evaluate(self, padded_input, input_lengths, padded_target, args, beam_search=False, beam_width=0, beam_nbest=0, lm=None, lm_rescoring=False, lm_weight=0.1, c_weight=1, start_token=-1, verbose=False):
         """
@@ -325,26 +332,17 @@ class Decoder(nn.Module):
             decoder_self_attn_list += [decoder_self_attn]
             decoder_encoder_attn_list += [decoder_enc_attn]
 
-        final_decoded_output = []
-        final_gold = []
+        final_decoded_output = self.output_linear(decoder_output)
+        final_gold = seq_out_pad
 
-        for i in range(len(decoder_output)):
-            final_decoded_output.append(self.output_linear(decoder_output[i].unsqueeze(0)).squeeze())
-            final_gold.append(seq_out_pad[i])
+        # for i in range(len(decoder_output)):
+        #     final_decoded_output.append(self.output_linear(decoder_output[i].unsqueeze(0)).squeeze())
+        #     final_gold.append(seq_out_pad[i])
         
-        final_decoded_output = torch.stack(final_decoded_output, dim=0)
-        final_gold = torch.stack(final_gold, dim=0)
+        # final_decoded_output = torch.stack(final_decoded_output, dim=0)
+        # final_gold = torch.stack(final_gold, dim=0)
 
         return final_decoded_output, final_gold, decoder_self_attn_list, decoder_encoder_attn_list
-
-    def post_process_hyp(self, hyp):
-        """
-        args: 
-            hyp: list of hypothesis
-        output:
-            list of hypothesis (string)>
-        """
-        return "".join([self.src_id2label[int(x)] for x in hyp['yseq'][1:]])
 
     def greedy_search(self, encoder_padded_outputs, args, beam_width=2, lm_rescoring=False, lm=None, lm_weight=0.1, c_weight=1, start_token=-1):
         """
@@ -498,7 +496,7 @@ class Decoder(nn.Module):
 
             for hyp in nbest_hyps:                
                 hyp["yseq"] = hyp["yseq"][0].cpu().numpy().tolist()
-                hyp_strs = self.post_process_hyp(hyp)
+                hyp_strs = self.decode_hyp(hyp)
                 batch_ids_nbest_hyps.append(hyp["yseq"])
                 batch_strs_nbest_hyps.append(hyp_strs)
                 # print(hyp["yseq"], hyp_strs)
@@ -534,4 +532,4 @@ class DecoderLayer(nn.Module):
         decoder_output = self.pos_ffn(decoder_output)
         decoder_output *= non_pad_mask
 
-        return decoder_output, decoder_self_attn, decoder_encoder_attn        
+        return decoder_output, decoder_self_attn, decoder_encoder_attn

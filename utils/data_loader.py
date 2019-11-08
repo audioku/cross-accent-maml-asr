@@ -398,7 +398,7 @@ class CPT2SpectogramDataset(Dataset, SpectrogramParser):
         #         lang = ipa_map[self.lang_list[i].replace("<","").replace(">","").lower()]
         #         self.ipa_list.append(epitran.Epitran(lang))
 
-        super(SpectrogramDataset, self).__init__(
+        super(CPT2SpectogramDataset, self).__init__(
             audio_conf, normalize, augment)
 
     def __getitem__(self, index):
@@ -469,49 +469,50 @@ class NoiseInjection(object):
         return data
 
 class AudioDataLoader(DataLoader):
-    def __init__(self, pad_token_id, *args, **kwargs):
+    def __init__(self, vocab, *args, **kwargs):
         super(AudioDataLoader, self).__init__(*args, **kwargs)
-        self.pad_token_id = pad_token_id
+        self.pad_token_id = vocab.PAD_ID
     
-    def collate_fn(batch):
-        def func(p):
-            return p[0].size(1)
+        def _collate_fn(batch):
+            def func(p):
+                return p[0].size(1)
 
-        def func_trg(p):
-            return len(p[1])
+            def func_trg(p):
+                return len(p[1])
 
-        def func_trg_transcript(p):
-            return len(p[2])
+            def func_trg_transcript(p):
+                return len(p[2])
 
-        # descending sorted
-        batch = sorted(batch, key=lambda sample: sample[0].size(1), reverse=True)
+            # descending sorted
+            batch = sorted(batch, key=lambda sample: sample[0].size(1), reverse=True)
 
-        max_seq_len = max(batch, key=func)[0].size(1)
-        freq_size = max(batch, key=func)[0].size(0)
-        max_trg_len = len(max(batch, key=func_trg)[1])
+            max_seq_len = max(batch, key=func)[0].size(1)
+            freq_size = max(batch, key=func)[0].size(0)
+            max_trg_len = len(max(batch, key=func_trg)[1])
 
-        inputs = torch.zeron(len(batch), 1, freq_size, max_seq_len)
-        input_sizes = torch.IntTensor(len(batch))
-        input_percentages = torch.FloatTensor(len(batch))
+            inputs = torch.zeros(len(batch), 1, freq_size, max_seq_len)
+            input_sizes = torch.IntTensor(len(batch))
+            input_percentages = torch.FloatTensor(len(batch))
 
-        targets = torch.full((len(batch), max_trg_len), self.pad_token_id).long()
-        target_sizes = torch.IntTensor(len(batch))
+            targets = torch.full((len(batch), max_trg_len), self.pad_token_id).long()
+            target_sizes = torch.IntTensor(len(batch))
 
-        for x in range(len(batch)):
-            sample = batch[x]
-            input_data = sample[0]
-            target = sample[1]
-            seq_length = input_data.size(1)
-            input_sizes[x] = seq_length
-            inputs[x][0].narrow(1, 0, seq_length).copy_(input_data)
-            input_percentages[x] = seq_length / float(max_seq_len)
-            target_sizes[x] = len(target)
-            targets[x][:len(target)] = torch.IntTensor(target)
+            for x in range(len(batch)):
+                sample = batch[x]
+                input_data = sample[0]
+                target = sample[1]
+                seq_length = input_data.size(1)
+                input_sizes[x] = seq_length
+                inputs[x][0].narrow(1, 0, seq_length).copy_(input_data)
+                input_percentages[x] = seq_length / float(max_seq_len)
+                target_sizes[x] = len(target)
+                targets[x][:len(target)] = torch.IntTensor(target)
 
-        # print(">", targets[0], langs, lang_names)
-        # print(target_transcripts)
-        return inputs, targets, input_percentages, input_sizes, target_sizes
+            # print(">", targets[0], langs, lang_names)
+            # print(target_transcripts)
+            return inputs, targets, input_percentages, input_sizes, target_sizes
 
+        self.collate_fn = _collate_fn
 
 class BucketingSampler(Sampler):
     def __init__(self, data_source, batch_size=1):

@@ -5,8 +5,9 @@ import torch.nn as nn
 import logging
 import numpy as np
 
-from modules import CPT2LMHeadModel
-from models.asr.transformer_cpt2 import TransformerCPT2, Encoder, Decoder
+# from modules import CPT2LMHeadModel
+# from models.asr.transformer_cpt2 import TransformerCPT2, Encoder, Decoder
+from models.asr.transformer import Transformer, Encoder, Decoder
 from utils.optimizer import NoamOpt, AnnealingOpt
 
 def generate_labels(labels, special_token_list):
