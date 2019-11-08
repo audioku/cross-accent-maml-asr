@@ -2,9 +2,7 @@ import torch
 import torch.nn.functional as F
 import Levenshtein as Lev
 
-from utils import constant
-
-from data.helper import get_word_segments_per_language, is_contain_chinese_word
+from utils.data import get_word_segments_per_language, is_contain_chinese_word
 
 def calculate_cer_en_zh(s1, s2):
     """
@@ -67,7 +65,7 @@ def calculate_wer(s1, s2):
 
     return Lev.distance(''.join(w1), ''.join(w2))
 
-def calculate_metrics(pred, gold, input_lengths=None, target_lengths=None, smoothing=0.0, loss_type="ce"):
+def calculate_metrics(pred, gold, vocab, input_lengths=None, target_lengths=None, smoothing=0.0, loss_type="ce"):
     """
     Calculate metrics
     args:
@@ -76,12 +74,12 @@ def calculate_metrics(pred, gold, input_lengths=None, target_lengths=None, smoot
         input_lengths: B (for CTC)
         target_lengths: B (for CTC)
     """
-    loss = calculate_loss(pred, gold, input_lengths, target_lengths, smoothing, loss_type)
+    loss = calculate_loss(pred, gold, vocab, input_lengths, target_lengths, smoothing, loss_type)
     if loss_type == "ce":
         pred = pred.view(-1, pred.size(2)) # (B*T) x C
         gold = gold.contiguous().view(-1) # (B*T)
         pred = pred.max(1)[1]
-        non_pad_mask = gold.ne(constant.PAD_TOKEN)
+        non_pad_mask = gold.ne(vocab.PAD_ID)
         num_correct = pred.eq(gold)
         num_correct = num_correct.masked_select(non_pad_mask).sum().item()
         return loss, num_correct
@@ -91,7 +89,7 @@ def calculate_metrics(pred, gold, input_lengths=None, target_lengths=None, smoot
         print("loss is not defined")
         return None, None
 
-def calculate_loss(pred, gold, input_lengths=None, target_lengths=None, smoothing=0.0, loss_type="ce"):
+def calculate_loss(pred, gold, vocab, input_lengths=None, target_lengths=None, smoothing=0.0, loss_type="ce"):
     """
     Calculate loss
     args:
@@ -107,21 +105,22 @@ def calculate_loss(pred, gold, input_lengths=None, target_lengths=None, smoothin
     if loss_type == "ce":
         pred = pred.view(-1, pred.size(2)) # (B*T) x C
         gold = gold.contiguous().view(-1) # (B*T)
+
         if smoothing > 0.0:
             eps = smoothing
             num_class = pred.size(1)
 
-            gold_for_scatter = gold.ne(constant.PAD_TOKEN).long() * gold
+            gold_for_scatter = gold.ne(vocab.PAD_ID).long() * gold
             one_hot = torch.zeros_like(pred).scatter(1, gold_for_scatter.view(-1, 1), 1)
             one_hot = one_hot * (1-eps) + (1-one_hot) * eps / num_class
             log_prob = F.log_softmax(pred, dim=1)
 
-            non_pad_mask = gold.ne(constant.PAD_TOKEN)
+            non_pad_mask = gold.ne(vocab.PAD_ID)
             num_word = non_pad_mask.sum().item()
             loss = -(one_hot * log_prob).sum(dim=1)
             loss = loss.masked_select(non_pad_mask).sum() / num_word
         else:
-            loss = F.cross_entropy(pred, gold, ignore_index=constant.PAD_TOKEN, reduction="mean")
+            loss = F.cross_entropy(pred, gold, ignore_index=vocab.PAD_ID, reduction="mean")
     elif loss_type == "ctc":
         log_probs = pred.transpose(0, 1) # T x B x C
         # print(gold.size())

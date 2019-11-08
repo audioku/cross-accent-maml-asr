@@ -5,7 +5,8 @@ import torch.nn as nn
 import logging
 import numpy as np
 
-from models.asr.transformer import Transformer, Encoder, Decoder
+from modules import CPT2LMHeadModel
+from models.asr.transformer_cpt2 import TransformerCPT2, Encoder, Decoder
 from utils.optimizer import NoamOpt, AnnealingOpt
 
 def generate_labels(labels, special_token_list):
@@ -178,14 +179,64 @@ def init_transformer_model(args, vocab, train=True, is_factorized=False, r=100):
     encoder = Encoder(num_enc_layers, num_heads=num_heads, dim_model=dim_model, dim_key=dim_key, dim_value=dim_value, dim_input=dim_input, dim_inner=dim_inner, src_max_length=src_max_len, dropout=dropout, is_factorized=is_factorized, r=r)
     decoder = Decoder(vocab, num_layers=num_dec_layers, num_heads=num_heads, dim_emb=dim_emb, dim_model=dim_model, dim_inner=dim_inner, dim_key=dim_key, dim_value=dim_value, trg_max_length=tgt_max_len, dropout=dropout, emb_trg_sharing=emb_trg_sharing, is_factorized=is_factorized, r=r)
     decoder = decoder if train else decoder
-    model = Transformer(encoder, decoder, feat_extractor=feat_extractor, train=train)
+    model = Transformer(encoder, decoder, vocab, feat_extractor=feat_extractor, train=train)
+
+    return model
+
+def init_cpt2_model(args, tokenizer, pad_id, sos_id, eos_id, vocab, train=True, is_factorized=False, r=100, mha_block=[0,0,1,1,0,0]):
+    """
+    Initiate a new transformer object
+    """
+    if args.feat_extractor == 'emb_cnn':
+        hidden_size = int(math.floor(
+            (args.sample_rate * args.window_size) / 2) + 1)
+        hidden_size = int(math.floor(hidden_size - 41) / 2 + 1)
+        hidden_size = int(math.floor(hidden_size - 21) / 2 + 1)
+        hidden_size *= 32
+        args.dim_input = hidden_size
+    elif args.feat_extractor == 'vgg_cnn':
+        hidden_size = int(math.floor((args.sample_rate * args.window_size) / 2) + 1) # 161
+        hidden_size = int(math.floor(int(math.floor(hidden_size)/2)/2)) * 128 # divide by 2 for maxpooling
+        args.dim_input = hidden_size
+        if args.feat == "logfbank":
+            args.dim_input = 2560
+    elif args.feat_extractor == 'large_cnn':
+        hidden_size = int(math.floor((args.sample_rate * args.window_size) / 2) + 1) # 161
+        hidden_size = int(math.floor(int(math.floor(hidden_size)/2)/2)) * 64 # divide by 2 for maxpooling
+        args.dim_input = hidden_size
+    else:
+        print("the model is initialized without feature extractor")
+
+    num_enc_layers = args.num_enc_layers
+    num_dec_layers = args.num_dec_layers
+    num_heads = args.num_heads
+    dim_model = args.dim_model
+    dim_key = args.dim_key
+    dim_value = args.dim_value
+    dim_input = args.dim_input
+    dim_inner = args.dim_inner
+    dim_emb = args.dim_emb
+    src_max_len = args.src_max_len
+    tgt_max_len = args.tgt_max_len
+    dropout = args.dropout
+    emb_trg_sharing = args.emb_trg_sharing
+    feat_extractor = args.feat_extractor
+
+    encoder = Encoder(num_enc_layers, num_heads=num_heads, dim_model=dim_model, dim_key=dim_key, dim_value=dim_value, dim_input=dim_input, dim_inner=dim_inner, src_max_length=src_max_len, dropout=dropout, is_factorized=is_factorized, r=r)
+
+    # CPT2
+    cpt2 = CPT2LMHeadModel.from_pretrained('distilgpt2', mha_block=mha_block)
+    bert_model = BertModel.from_pretrained('bert-base-chinese')
+    bert_word_embedding = bert_model.embeddings.word_embeddings
+    cpt2.extend_embedding(bert_word_embedding)
+    
+    model = TransformerCPT2(encoder, cpt2, tokenizer, pad_id, sos_id, eos_id, vocab, feat_extractor=feat_extractor, train=train)
 
     return model
 
 def post_process(string, vocab):
     special_token_list = vocab.special_token_list
     for i in range(len(special_token_list)):
-        if special_token_list[i] != vocab.PAD_TOKEN:
-            string = string.replace(special_token_list[i],"")
+        string = string.replace(special_token_list[i],"")
     string = string.replace("▁"," ")
     return string

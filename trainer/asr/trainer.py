@@ -18,38 +18,26 @@ class Trainer():
     def __init__(self):
         logging.info("Trainer is initialized")
 
-    def train_one_batch(self, model, vocab, src, trg, trg_transcript, src_percentages, src_lengths, trg_lengths, smoothing, loss_type):
-        pred, gold, hyp = model(src, src_lengths, trg, trg_transcript, verbose=False)
+    def train_one_batch(self, model, vocab, src, trg, src_percentages, src_lengths, trg_lengths, smoothing, loss_type):
+        pred, gold, hyp = model(src, src_lengths, trg, verbose=False)
         strs_golds, strs_hyps = [], []
 
-        for lang_id in range(len(gold)):
-            gold_seq = gold[lang_id]
-            for j in range(len(gold_seq)):
-                ut_gold = gold_seq[j]
-                strs_golds.append("".join([vocab.id2label[int(x)] for x in ut_gold]))
+        for j in range(len(gold)):
+            ut_gold = gold[j]
+            strs_golds.append("".join([vocab.id2label[int(x)] for x in ut_gold]))
         
-        for lang_id in range(len(hyp)):
-            hyp_seq = hyp[lang_id]
-            for j in range(len(hyp_seq)):
-                ut_hyp = hyp_seq[j]
-                strs_hyps.append("".join([vocab.id2label[int(x)] for x in ut_hyp]))
+        for j in range(len(hyp)):
+            ut_hyp = hyp[j]
+            strs_hyps.append("".join([vocab.id2label[int(x)] for x in ut_hyp]))
+
+        # print(pred.size())
 
         # handling the last batch
-        for j in range(len(pred)):
-            if len(pred[j]) > 0:
-                seq_length = pred[j].size(1)
-                break
-        sizes = Variable(src_percentages.mul_(int(seq_length)).int(), requires_grad=False)
+        seq_length = pred.size(1)
+        sizes = src_percentages.mul_(int(seq_length)).int()
 
-        loss = None
-        for j in range(len(pred)):
-            if len(pred[j]) == 0: continue
-            t_loss, num_correct = calculate_metrics(
-                pred[j], gold[j], input_lengths=sizes, target_lengths=trg_lengths, smoothing=smoothing, loss_type=loss_type)
-            if loss is None:
-                loss = t_loss
-            else:
-                loss = loss + t_loss
+        loss, num_correct = calculate_metrics(pred, gold, vocab, input_lengths=sizes, target_lengths=trg_lengths, smoothing=smoothing, loss_type=loss_type)
+
         if loss is None:
             print("loss is None")
 
@@ -106,74 +94,74 @@ class Trainer():
             max_len = 0
             for i, (data) in enumerate(pbar, start=start_iter):
                 torch.cuda.empty_cache()
-                src, trg, trg_transcript, src_percentages, src_lengths, trg_lengths = data
+                src, trg, src_percentages, src_lengths, trg_lengths = data
                 max_len = max(max_len, src.size(-1))
 
                 opt.zero_grad()
 
-                try:
-                    if USE_CUDA:
-                        src = src.cuda()
-                        trg = trg.cuda()
-                        trg_transcript = trg_transcript.cuda()
+                # try:
+                if args.cuda:
+                    src = src.cuda()
+                    trg = trg.cuda()
 
-                    start_time = time.time()
-                    loss, cer, num_char = self.train_one_batch(model, vocab, src, trg, trg_transcript, src_percentages, src_lengths, trg_lengths, smoothing, loss_type)
-                    total_cer += cer
-                    total_char += num_char
-                    loss.backward()
+                start_time = time.time()
+                loss, cer, num_char = self.train_one_batch(model, vocab, src, trg, src_percentages, src_lengths, trg_lengths, smoothing, loss_type)
+                total_cer += cer
+                total_char += num_char
+                loss.backward()
 
-                    if args.clip:
-                        torch.nn.utils.clip_grad_norm_(model.parameters(), args.max_norm)
-                    
-                    opt.step()
-                    total_loss += loss.item()
+                if args.clip:
+                    torch.nn.utils.clip_grad_norm_(model.parameters(), args.max_norm)
+                
+                opt.step()
+                total_loss += loss.item()
 
-                    end_time = time.time()
-                    diff_time = end_time - start_time
-                    total_time += diff_time
+                end_time = time.time()
+                diff_time = end_time - start_time
+                total_time += diff_time
 
-                    pbar.set_description("(Epoch {}) TRAIN LOSS:{:.4f} CER:{:.2f}% LR:{:.7f} TOTAL TIME:{:.7f}".format(
-                        (epoch+1), total_loss/(i+1), total_cer*100/total_char, opt._rate, total_time))
-                except:
-                    # del loss
-                    try:
-                        torch.cuda.empty_cache()
-                        src = src.cpu()
-                        trg = trg.cpu()
-                        src_splits, src_lengths_splits, trg_lengths_splits, trg_splits, trg_transcript_splits, src_percentages_splits = iter(src.split(2, dim=0)), iter(src_lengths.split(2, dim=0)), iter(trg_lengths.split(2, dim=0)), iter(trg.split(2, dim=0)), iter(trg_transcript.split(2, dim=0)), iter(src_percentages.split(2, dim=0))
-                        j = 0
+                pbar.set_description("(Epoch {}) TRAIN LOSS:{:.4f} CER:{:.2f}% LR:{:.7f} TOTAL TIME:{:.7f}".format(
+                    (epoch+1), total_loss/(i+1), total_cer*100/total_char, opt._rate, total_time))
+                # except Exception as e:
+                #     print(e)
+                #     # del loss
+                #     try:
+                #         torch.cuda.empty_cache()
+                #         src = src.cpu()
+                #         trg = trg.cpu()
+                #         src_splits, src_lengths_splits, trg_lengths_splits, trg_splits, src_percentages_splits = iter(src.split(2, dim=0)), iter(src_lengths.split(2, dim=0)), iter(trg_lengths.split(2, dim=0)), iter(trg.split(2, dim=0)), iter(src_percentages.split(2, dim=0))
+                #         j = 0
 
-                        start_time = time.time()
-                        for src, trg, src_lengths, trg_lengths, trg_transcript, src_percentages in zip(src_splits, trg_splits, src_lengths_splits, trg_lengths_splits, trg_transcript_splits, src_percentages_splits):
-                            opt.zero_grad()
-                            torch.cuda.empty_cache()
-                            if USE_CUDA:
-                                src = src.cuda()
-                                trg = trg.cuda()
+                #         start_time = time.time()
+                #         for src, trg, src_lengths, trg_lengths, src_percentages in zip(src_splits, trg_splits, src_lengths_splits, trg_lengths_splits, src_percentages_splits):
+                #             opt.zero_grad()
+                #             torch.cuda.empty_cache()
+                #             if args.cuda:
+                #                 src = src.cuda()
+                #                 trg = trg.cuda()
 
-                            start_time = time.time()
-                            loss, cer, num_char = self.train_one_batch(model, vocab, src, trg, trg_transcript, src_percentages, src_lengths, trg_lengths, smoothing, loss_type)
-                            total_cer += cer
-                            total_char += num_char
-                            loss.backward()
+                #             start_time = time.time()
+                #             loss, cer, num_char = self.train_one_batch(model, vocab, src, trg, src_percentages, src_lengths, trg_lengths, smoothing, loss_type)
+                #             total_cer += cer
+                #             total_char += num_char
+                #             loss.backward()
 
-                            if args.clip:
-                                torch.nn.utils.clip_grad_norm_(model.parameters(), args.max_norm)
+                #             if args.clip:
+                #                 torch.nn.utils.clip_grad_norm_(model.parameters(), args.max_norm)
                             
-                            opt.step()
-                            total_loss += loss.item()
-                            j += 1
+                #             opt.step()
+                #             total_loss += loss.item()
+                #             j += 1
 
-                        end_time = time.time()
-                        diff_time = end_time - start_time
-                        total_time += diff_time
-                        logging.info("probably OOM, autosplit batch. succeeded")
-                        print("probably OOM, autosplit batch. succeeded")
-                    except:
-                        logging.info("probably OOM, autosplit batch. skip batch")
-                        print("probably OOM, autosplit batch. skip batch")
-                        continue
+                #         end_time = time.time()
+                #         diff_time = end_time - start_time
+                #         total_time += diff_time
+                #         logging.info("probably OOM, autosplit batch. succeeded")
+                #         print("probably OOM, autosplit batch. succeeded")
+                #     except:
+                #         logging.info("probably OOM, autosplit batch. skip batch")
+                #         print("probably OOM, autosplit batch. skip batch")
+                #         continue
 
             pbar.set_description("(Epoch {}) TRAIN LOSS:{:.4f} CER:{:.2f}% LR:{:.7f} TOTAL TIME:{:.7f}".format((epoch+1), total_loss/(i+1), total_cer*100/total_char, opt._rate, total_time))
 
@@ -201,13 +189,12 @@ class Trainer():
                 for i, (data) in enumerate(valid_pbar):
                     torch.cuda.empty_cache()
 
-                    src, trg, trg_transcript, src_percentages, src_lengths, trg_lengths = data
+                    src, trg, src_percentages, src_lengths, trg_lengths = data
                     try:
-                        if USE_CUDA:
+                        if args.cuda:
                             src = src.cuda()
                             trg = trg.cuda()
-                            trg_transcript = trg_transcript.cuda()
-                        loss, cer, num_char = self.train_one_batch(model, vocab, src, trg, trg_transcript, src_percentages, src_lengths, trg_lengths, smoothing, loss_type)
+                        loss, cer, num_char = self.train_one_batch(model, vocab, src, trg, src_percentages, src_lengths, trg_lengths, smoothing, loss_type)
                         total_valid_cer += cer
                         total_valid_char += num_char
 
@@ -223,14 +210,14 @@ class Trainer():
                             trg = trg.cpu()
                             src_splits, src_lengths_splits, trg_lengths_splits, trg_splits, trg_transcript_splits, src_percentages_splits = iter(src.split(2, dim=0)), iter(src_lengths.split(2, dim=0)), iter(trg_lengths.split(2, dim=0)), iter(trg.split(2, dim=0)), iter(trg_transcript.split(2, dim=0)), iter(src_percentages.split(2, dim=0))
                             j = 0
-                            for src, trg, src_lengths, trg_lengths, trg_transcript, src_percentages in zip(src_splits, trg_splits, src_lengths_splits, trg_lengths_splits, trg_transcript_splits, src_percentages_splits):
+                            for src, trg, src_lengths, trg_lengths, src_percentages in zip(src_splits, trg_splits, src_lengths_splits, trg_lengths_splits, src_percentages_splits):
                                 opt.zero_grad()
                                 torch.cuda.empty_cache()
-                                if USE_CUDA:
+                                if args.cuda:
                                     src = src.cuda()
                                     trg = trg.cuda()
 
-                                loss, cer, num_char = self.train_one_batch(model, vocab, src, trg, trg_transcript, src_percentages, src_lengths, trg_lengths, smoothing, loss_type)
+                                loss, cer, num_char = self.train_one_batch(model, vocab, src, trg, src_percentages, src_lengths, trg_lengths, smoothing, loss_type)
                                 total_valid_cer += cer
                                 total_valid_char += num_char
 

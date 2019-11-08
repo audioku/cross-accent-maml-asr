@@ -1,17 +1,24 @@
 import argparse
 import json
 import time
-import numpy as np
+import math
+import logging
+import sys
+import os
 import torch
 import torch.nn as nn
+import numpy as np
 
+from torchsummary import summary
 from torch.autograd import Variable
-from tqdm import tqdm
-from models.asr.transformer import Transformer, Encoder, Decoder
-from utils.data_loader import SpectrogramDataset, LogFBankDataset, AudioDataLoader, BucketingSampler
-from utils.optimizer import NoamOpt
-from utils.metrics import calculate_metrics, calculate_cer, calculate_wer, calculate_cer_en_zh
-from utils.functions import save_model, load_model, post_process, compute_num_params
+from trainer.asr.trainer import Trainer
+from utils.data import Vocab
+from utils.data_loader import CPT2SpectrogramDataset, CPT2LogFBankDataset, AudioDataLoader, BucketingSampler
+from utils.functions import save_model, load_model, init_cpt2_model, init_optimizer, compute_num_params, generate_labels
+
+from transformers.tokenization_gpt2 import GPT2Tokenizer
+from transformers.tokenization_bert import BertTokenizer
+from utils.tokenizer import ChineseEnglishTokenizer
 
 parser = argparse.ArgumentParser(description='Transformer ASR training')
 parser.add_argument('--model', default='TRFS', type=str, help="")
@@ -39,6 +46,7 @@ parser.add_argument('--emb-trg-sharing', action='store_true', help='Share embedd
 parser.add_argument('--feat_extractor', default='vgg_cnn', type=str, help='emb_cnn or vgg_cnn or none')
 parser.add_argument('--feat', type=str, default='spectrogram', help='spectrogram or logfbank')
 parser.add_argument('--verbose', action='store_true', help='Verbose')
+
 parser.add_argument('--continue-from', default='', type=str, help='Continue from checkpoint model')
 parser.add_argument('--augment', dest='augment', action='store_true', help='Use random tempo and gain perturbations.')
 parser.add_argument('--noise-dir', default=None,
@@ -62,6 +70,8 @@ parser.add_argument('--dim-emb', default=512, type=int, help='Embedding dimensio
 
 parser.add_argument('--src-max-len', default=2500, type=int, help='Source max length')
 parser.add_argument('--tgt-max-len', default=1000, type=int, help='Target max length')
+
+parser.add_argument('-mha', '--mha-block', help='comma separated mha block list input', default=None, type=str)
 
 # Noam optimizer
 parser.add_argument('--warmup', default=4000, type=int, help='Warmup')
@@ -108,102 +118,101 @@ torch.cuda.manual_seed_all(123456)
 args = parser.parse_args()
 USE_CUDA = args.cuda
 
-def evaluate(model, vocab, test_loader, lm=None, special_token_list=[], start_token=-1):
-    """
-    Evaluation
-    args:
-        model: Model object
-        test_loader: DataLoader object
-    """
-    model.eval()
-
-    total_word, total_char, total_cer, total_wer = 0, 0, 0, 0
-    total_en_cer, total_zh_cer, total_en_char, total_zh_char = 0, 0, 0, 0
-    total_hyp_char = 0
-    total_time = 0
-
-    with torch.no_grad():
-        test_pbar = tqdm(iter(test_loader), leave=True, total=len(test_loader))
-        for i, (data) in enumerate(test_pbar):
-            src, trg, src_percentages, src_lengths, trg_lengths = data
-
-            if USE_CUDA:
-                src = src.cuda()
-                trg = trg.cuda()
-
-            start_time = time.time()
-            batch_ids_hyps, batch_strs_hyps, batch_strs_gold = model.evaluate(
-                src, src_lengths, trg, args, beam_search=args.beam_search, beam_width=args.beam_width, beam_nbest=args.beam_nbest, lm=lm, lm_rescoring=args.lm_rescoring, lm_weight=args.lm_weight, c_weight=args.c_weight, start_token=start_token, verbose=args.verbose)
-
-            for x in range(len(batch_strs_gold)):
-                hyp = post_process(batch_strs_hyps[x], vocab)
-                gold = post_process(batch_strs_gold[x], vocab)
-
-                wer = calculate_wer(hyp, gold)
-                cer = calculate_cer(hyp.strip(), gold.strip())
-
-                if args.verbose:
-                    print("HYP",hyp)
-                    print("GOLD:",gold)
-                    print("CER:",cer)
-
-                en_cer, zh_cer, num_en_char, num_zh_char = calculate_cer_en_zh(hyp, gold)
-                total_en_cer += en_cer
-                total_zh_cer += zh_cer
-                total_en_char += num_en_char
-                total_zh_char += num_zh_char
-                total_hyp_char += len(hyp)
-
-                total_wer += wer
-                total_cer += cer
-                total_word += len(gold.split(" "))
-                total_char += len(gold)
-
-            end_time = time.time()
-            diff_time = end_time - start_time
-            total_time += diff_time
-            diff_time_per_word = total_time / total_word
-
-            test_pbar.set_description("TEST CER:{:.2f}% WER:{:.2f}% CER_EN:{:.2f}% CER_ZH:{:.2f}% TOTAL_TIME:{:.7f} TOTAL HYP CHAR:{:.2f}".format(
-                total_cer*100/total_char, total_wer*100/total_word, total_en_cer*100/max(1, total_en_char), total_zh_cer*100/max(1, total_zh_char), total_time, total_hyp_char))
-
-
 if __name__ == '__main__':
-    start_iter = 0
-
-    # Load the model
-    load_path = args.continue_from
-    model, vocab, opt, epoch, metrics, loaded_args = load_model(args.continue_from, train=False)
-    
-    print("EPOCH:", epoch)
-
-    audio_conf = dict(sample_rate=loaded_args.sample_rate,
-                      window_size=loaded_args.window_size,
-                      window_stride=loaded_args.window_stride,
-                      window=loaded_args.window,
-                      noise_dir=loaded_args.noise_dir,
-                      noise_prob=loaded_args.noise_prob,
-                      noise_levels=(loaded_args.noise_min, loaded_args.noise_max))
-
-    test_manifest_list = args.test_manifest_list
-
+    print("="*50)
+    print("THE EXPERIMENT LOG IS SAVED IN: " + "log/" + args.name)
+    print("TRAINING MANIFEST: ", args.train_manifest_list)
+    print("VALID MANIFEST: ", args.valid_manifest_list)
+    print("TEST MANIFEST: ", args.test_manifest_list)
     print("INPUT TYPE: ", args.input_type)
-    if loaded_args.feat == "spectrogram":
-        test_data = SpectrogramDataset(vocab, args, audio_conf=audio_conf, manifest_filepath_list=[test_manifest_list[0]], normalize=True, augment=False, input_type=args.input_type)
-    elif loaded_args.feat == "logfbank":
-        test_data = LogFBankDataset(vocab, args, audio_conf=audio_conf, manifest_filepath_list=[test_manifest_list[0]], normalize=True, augment=False, input_type=args.input_type)
-    test_sampler = BucketingSampler(test_data, batch_size=args.batch_size)
-    test_loader = AudioDataLoader(test_data, num_workers=args.num_workers, batch_sampler=test_sampler)
+    print("="*50)
 
-    lm = None
-    # if args.lm_rescoring:
-    #     lm = LM(args.lm_path)
+    if args.mha_block:
+        mha_block = [int(item) for item in args.mha_block.split(',')]
+    else:
+        mha_block = [0,0,1,1,0,0]
 
-    # # print(model)
+    if not os.path.exists("./log"): os.mkdir("./log")
+    for handler in logging.root.handlers[:]: logging.root.removeHandler(handler)
+        
+    if args.continue_from == '':
+        logging.basicConfig(filename="log/" + args.name + ".log", filemode='w+', format='%(asctime)s - %(message)s', level=logging.INFO)
+        print("TRAINING FROM SCRATCH")
+        logging.info("TRAINING FROM SCRATCH")
+    else:
+        logging.basicConfig(filename="log/" + args.name + ".log", filemode='a+', format='%(asctime)s - %(message)s', level=logging.INFO)
+        print("RESUME TRAINING")
+        logging.info("RESUME TRAINING")
+
+    audio_conf = dict(sample_rate=args.sample_rate,
+                      window_size=args.window_size,
+                      window_stride=args.window_stride,
+                      window=args.window,
+                      noise_dir=args.noise_dir,
+                      noise_prob=args.noise_prob,
+                      noise_levels=(args.noise_min, args.noise_max))
+
+    logging.info(audio_conf)
+    
+    with open(args.labels_path, encoding="utf-8") as label_file:
+        labels = json.load(label_file)
+
+    # Load Vocab
+    vocab = Vocab()
+    for label in labels:
+        vocab.add_token(label)
+        vocab.add_label(label)
+
+    # Load Tokenizer
+    gpt2_en_tokenizer = GPT2Tokenizer.from_pretrained('gpt2')
+    bert_cn_tokenizer = BertTokenizer.from_pretrained('bert-base-chinese')
+    cn_en_tokenizer = ChineseEnglishTokenizer(gpt2_en_tokenizer, bert_cn_tokenizer)
+    
+    pad_id = tokenizer.eos_token_id
+    sos_id = tokenizer.bos_token_id
+    eos_id = tokenizer.eos_token_id
+
+    if args.feat == "spectrogram":
+        train_data = CPT2SpectrogramDataset(tokenizer, args, audio_conf, manifest_filepath_list=args.train_manifest_list, normalize=True, augment=args.augment, input_type=args.input_type, is_train=True)
+    elif args.feat == "logfbank":
+        train_data = CPT2LogFBankDataset(tokenizer, args, audio_conf, manifest_filepath_list=args.train_manifest_list, normalize=True, augment=args.augment, input_type=args.input_type, is_train=True)
+    train_sampler = BucketingSampler(train_data, batch_size=args.batch_size)
+    train_loader = AudioDataLoader(train_data, num_workers=args.num_workers, batch_sampler=train_sampler)
+
+    valid_loader_list, test_loader_list = [], []
+    for i in range(len(args.valid_manifest_list)):
+        if args.feat == "spectrogram":
+            valid_data = CPT2SpectrogramDataset(tokenizer, args, audio_conf, manifest_filepath_list=[args.valid_manifest_list[i]], normalize=True, augment=args.augment, input_type=args.input_type)
+        elif args.feat == "logfbank":
+            valid_data = CPT2LogFBankDataset(tokenizer, args, audio_conf, manifest_filepath_list=[args.valid_manifest_list[i]], normalize=True, augment=False, input_type=args.input_type)
+        valid_sampler = BucketingSampler(valid_data, batch_size=args.batch_size)
+        valid_loader = AudioDataLoader(valid_data, pad_id_token=pad_id, num_workers=args.num_workers)
+        valid_loader_list.append(valid_loader)
+
+    start_epoch = 0
+    metrics = None
+    loaded_args = None
+    if args.continue_from != "":
+        logging.info("Continue from checkpoint:" + args.continue_from)
+        model, vocab, opt, epoch, metrics, loaded_args = load_model(args.continue_from)
+        start_epoch = (epoch)  # index starts from zero
+        verbose = args.verbose
+    else:
+        if args.model == "TRFS":
+            model = init_cpt2_model(args, tokenizer, pad_id, sos_id, eos_id, vocab, is_factorized=args.is_factorized, r=args.r, mha_block=mha_block)
+            opt = init_optimizer(args, model, "noam")
+        else:
+            logging.info("The model is not supported, check args --h")
+    
+    loss_type = args.loss
+
+    if USE_CUDA:
+        model = model.cuda()
+
+    logging.info(model)
+    num_epochs = args.epochs
 
     print("Parameters: {}(trainable), {}(non-trainable)".format(compute_num_params(model)[0], compute_num_params(model)[1]))
 
-    if not args.cuda:
-        model = model.cpu()
-
-    evaluate(model, vocab, test_loader, lm=lm, start_token=vocab.SOS_ID)
+    trainer = Trainer()
+    trainer.train(model, vocab, train_loader, train_sampler, valid_loader_list, opt, loss_type, start_epoch, num_epochs, args, metrics, early_stop=args.early_stop)
