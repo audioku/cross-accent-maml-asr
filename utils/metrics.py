@@ -76,6 +76,8 @@ def calculate_metrics(pred, gold, pad_id, input_lengths=None, target_lengths=Non
     """
     if non_pad_mask is None:
         non_pad_mask = gold.ne(pad_id)
+    else:
+        gold.masked_fill_(torch.logical_not(non_pad_mask), pad_id)
             
     loss = calculate_loss(pred, gold, pad_id, input_lengths, target_lengths, non_pad_mask, smoothing, loss_type)
     if loss_type == "ce":

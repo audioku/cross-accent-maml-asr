@@ -126,7 +126,7 @@ class TransformerCPT2(nn.Module):
         final_decoded_output = []
 
         # Forward model
-        decoder_output = self.decoder(seq_in_pad, encoder_padded_outputs, encoder_padded_outputs, attention_mask=mask)
+        decoder_output = self.decoder(seq_in_pad, encoder_padded_outputs, encoder_padded_outputs, attention_mask=None)
 
         # Prepare output list
         pred_list = decoder_output

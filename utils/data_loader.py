@@ -378,7 +378,7 @@ class CPT2SpectrogramDataset(Dataset, SpectrogramParser):
 
         self.manifest_filepath_list = manifest_filepath_list
 
-        super(CPT2SpectogramDataset, self).__init__(
+        super(CPT2SpectrogramDataset, self).__init__(
             audio_conf, normalize, augment)
 
     def __getitem__(self, index):
@@ -450,11 +450,11 @@ class NoiseInjection(object):
         return data
 
 class AudioDataLoader(DataLoader):
-    def __init__(self, pad_id, *args, **kwargs):
+    def __init__(self, pad_token_id, *args, **kwargs):
         super(AudioDataLoader, self).__init__(*args, **kwargs)
-        self.pad_token_id = pad_id
+        self.pad_token_id = pad_token_id
         self.collate_fn = self.collate_function
-        
+    
     def collate_function(self, batch):
         def func(p):
             return p[0].size(1)
@@ -493,6 +493,7 @@ class AudioDataLoader(DataLoader):
         # print(">", targets[0], langs, lang_names)
         # print(target_transcripts)
         return inputs, targets, input_percentages, input_sizes, target_sizes
+
 
 class BucketingSampler(Sampler):
     def __init__(self, data_source, batch_size=1):

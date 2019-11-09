@@ -196,7 +196,7 @@ if __name__ == '__main__':
         verbose = args.verbose
     else:
         if args.model == "TRFS":
-            model = init_cpt2_model(args, cn_en_tokenizer, pad_id, sos_id, eos_id, vocab, is_factorized=args.is_factorized, r=args.r, mha_block=mha_block)
+            model = init_cpt2_model(args, cn_en_tokenizer, pad_id, sos_id, eos_id, vocab, is_factorized=args.is_factorized, r=args.r, mha_block=mha_block, include_chinese=False)
             opt = init_optimizer(args, model, "noam")
         else:
             logging.info("The model is not supported, check args --h")
@@ -208,7 +208,8 @@ if __name__ == '__main__':
 
     logging.info(model)
     num_epochs = args.epochs
-
+    model.train()
+    
     print("Parameters: {}(trainable), {}(non-trainable)".format(compute_num_params(model)[0], compute_num_params(model)[1]))
 
     trainer = TrainerCPT(cn_en_tokenizer)

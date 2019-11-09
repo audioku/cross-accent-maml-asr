@@ -37,7 +37,7 @@ class TrainerCPT():
         seq_length = pred.size(1)
         sizes = src_percentages.mul_(int(seq_length)).int()
 
-        loss, num_correct = calculate_metrics(pred, gold, self.tokenizer.eos_token_id, input_lengths=sizes, target_lengths=trg_lengths, non_pad_mask=non_pad_mask, smoothing=smoothing, loss_type=loss_type)
+        loss, num_correct = calculate_metrics(pred, gold, -1, input_lengths=sizes, target_lengths=trg_lengths, non_pad_mask=non_pad_mask, smoothing=smoothing, loss_type=loss_type)
 
         if loss is None:
             print("loss is None")
@@ -49,6 +49,8 @@ class TrainerCPT():
 
         total_cer, total_wer, total_char, total_word = 0, 0, 0, 0
         for j in range(len(strs_hyps)):
+#             print('hpys', strs_hyps[j])
+#             print('gold', strs_golds[j])
             cer = calculate_cer(strs_hyps[j].replace(' ', ''), strs_golds[j].replace(' ', ''))
             wer = calculate_wer(strs_hyps[j], strs_golds[j])
             total_cer += cer

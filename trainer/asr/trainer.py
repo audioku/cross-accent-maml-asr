@@ -105,7 +105,7 @@ class Trainer():
                     trg = trg.cuda()
 
                 start_time = time.time()
-                loss, cer, num_char = self.train_one_batch(model, vocab.PAD_ID, src, trg, src_percentages, src_lengths, trg_lengths, smoothing, loss_type)
+                loss, cer, num_char = self.train_one_batch(model, vocab, src, trg, src_percentages, src_lengths, trg_lengths, smoothing, loss_type)
                 total_cer += cer
                 total_char += num_char
                 loss.backward()

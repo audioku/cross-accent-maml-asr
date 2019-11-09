@@ -111,7 +111,7 @@ class ContextualAttention(nn.Module):
         else:
             return x.permute(0, 2, 1, 3)  # (batch, head, seq_length, head_features)
 
-    def forward(self, q, k, v, layer_past=None, attention_mask=None, head_mask=None):
+    def forward(self, q, k, v, layer_past=None, attention_mask=None, head_mask=None, apply_future_mask=False):
         qkv_same = (q.data_ptr() == k.data_ptr() == v.data_ptr())
         kv_same = (k.data_ptr() == v.data_ptr())
 
@@ -126,7 +126,7 @@ class ContextualAttention(nn.Module):
             query = F.linear(q, q_w.t(), q_b) # We need to transpose the weight because of Conv1D
             kv_w, kv_b = self.c_attn.weight[:, self.split_size:], self.c_attn.bias[self.split_size:]
             key, value = F.linear(k, kv_w.t(), kv_b).split(self.split_size, dim=-1) # We need to transpose the weight because of Conv1D
-            apply_future_mask = False # non self-attention
+            apply_future_mask = apply_future_mask or False # non self-attention if apply_future_mask not specified
         else:
             assert False
             
@@ -174,18 +174,20 @@ class ContextualBlock(nn.Module):
         self.ln_2 = nn.LayerNorm(nx, eps=config.layer_norm_epsilon)
         self.mlp = MLP(4 * nx, config)
 
-    def forward(self, q, k=None, v=None, layer_past=None, attention_mask=None, head_mask=None):
+    def forward(self, q, k=None, v=None, layer_past=None, attention_mask=None, head_mask=None, apply_future_mask=False):
         q_norm = self.ln_1(q)
         if k is None or v is None:
             output_attn = self.attn(q_norm, q_norm, q_norm,
                                     layer_past=layer_past,
                                     attention_mask=attention_mask,
-                                    head_mask=head_mask)
+                                    head_mask=head_mask,
+                                    apply_future_mask=apply_future_mask)
         else:
             output_attn = self.attn(q_norm, k, v,
                                     layer_past=layer_past,
                                     attention_mask=attention_mask,
-                                    head_mask=head_mask)
+                                    head_mask=head_mask,
+                                    apply_future_mask=apply_future_mask)
         a = output_attn[0]  # output_attn: a, present, (attentions)
 
         q = q + a
@@ -269,7 +271,8 @@ class CPT2Model(GPT2Model):
             token_type_embeds = self.wte(token_type_ids)
         else:
             token_type_embeds = 0
-        hidden_states = inputs_embeds + position_embeds + token_type_embeds
+        first_hidden_states = inputs_embeds + position_embeds + token_type_embeds
+        hidden_states = first_hidden_states
         hidden_states = self.drop(hidden_states)
 
         output_shape = input_shape + (hidden_states.size(-1),)
@@ -284,13 +287,21 @@ class CPT2Model(GPT2Model):
             if self.mha_block[i] == 0:
                 outputs = block(hidden_states, None, None,
                                 layer_past=layer_past,
-                                attention_mask=attention_mask,
-                                head_mask=head_mask[i])
-            else:
+                                attention_mask=None,
+                                head_mask=head_mask[i],
+                                apply_future_mask=False)
+            elif self.mha_block[i] == 1:
                 outputs = block(hidden_states, key, value,
                                 layer_past=layer_past,
+                                attention_mask=attention_mask,
+                                head_mask=head_mask[i],
+                                apply_future_mask=False)
+            else: # self.mha_block[i] == 2 # back to query
+                outputs = block(hidden_states, first_hidden_states, first_hidden_states,
+                                layer_past=layer_past,
                                 attention_mask=None,
-                                head_mask=head_mask[i])
+                                head_mask=head_mask[i],
+                                apply_future_mask=True)
 
             hidden_states, present = outputs[:2]
             if self.output_past:
@@ -373,6 +384,8 @@ if __name__ == '__main__':
         'resid_pdrop' : 0
     })
     
+    torch.random.manual_seed(100)
+    
     q = torch.randn((1,3,8))
     k = torch.randn((1,4,8))
     v = torch.randn((1,4,8))
@@ -392,17 +405,17 @@ if __name__ == '__main__':
     print('y', y)
     
     # Test CPT2
-    q = torch.randint(0, 2, (8,4))
-    y = torch.randint(0, 2, (8,4)).long()
-    k = torch.randn((8, 4, 768))
+    q = torch.randint(0, 2, (8,6))
+    y = torch.randint(0, 2, (8,6)).long()
+    k = torch.randn((8, 3, 768))
     
     # Test self attention
     print('Test CPT2 self-attention')
-    cpt2 = CPT2LMHeadModel.from_pretrained('distilgpt2')
-    optimizer = torch.optim.Adam(cpt2.parameters())
-    for i in range(3):
-        result = cpt2(q, labels=y)
-        loss = result[0]
+    cpt2 = CPT2LMHeadModel.from_pretrained('distilgpt2', mha_block=[0,0,0,0,0,0])
+    optimizer = torch.optim.Adam(cpt2.parameters(), lr=1e-4)
+    for i in range(16):
+        result = cpt2(q[:,:-1])
+        loss = F.cross_entropy(result.permute(0,2,1), q[:,1:])
         
         print('loss',loss)
 
@@ -412,11 +425,11 @@ if __name__ == '__main__':
     
     # Test non self-attention
     print('Test CPT2 non self-attention')
-    cpt2 = CPT2LMHeadModel.from_pretrained('distilgpt2')
-    optimizer = torch.optim.Adam(cpt2.parameters())
-    for i in range(3):
-        result = cpt2(q, k, k,labels=y)
-        loss = result[0]
+    cpt2 = CPT2LMHeadModel.from_pretrained('distilgpt2', mha_block=[1,1,0,0,0,0])
+    optimizer = torch.optim.Adam(cpt2.parameters(), lr=1e-4)
+    for i in range(16):
+        result = cpt2(q[:,:-1], k, k)
+        loss = F.cross_entropy(result.permute(0,2,1), q[:,1:])
         
         print('loss',loss)
 
@@ -428,8 +441,9 @@ if __name__ == '__main__':
     print('=BEFORE=')
     print('cpt2.lm_head.weight.shape', cpt2.lm_head.weight.shape)
     print('self.transformer.wte.weight.shape', cpt2.transformer.wte.weight.shape)
+    print('self.transformer.wpe.weight.shape', cpt2.transformer.wpe.weight.shape)
     
-    cpt2 = CPT2LMHeadModel.from_pretrained('distilgpt2')
+    cpt2 = CPT2LMHeadModel.from_pretrained('distilgpt2', mha_block=[0,0,0,0,0,0])
     bert_model = BertModel.from_pretrained('bert-base-chinese')
     bert_word_embedding = bert_model.embeddings.word_embeddings
     cpt2.extend_embedding(bert_word_embedding)
@@ -437,4 +451,5 @@ if __name__ == '__main__':
     print('=AFTER=')
     print('cpt2.lm_head.weight.shape', cpt2.lm_head.weight.shape)
     print('self.transformer.wte.weight.shape', cpt2.transformer.wte.weight.shape)
-    
+    print('self.transformer.wpe.weight.shape', cpt2.transformer.wpe.weight.shape)
+
