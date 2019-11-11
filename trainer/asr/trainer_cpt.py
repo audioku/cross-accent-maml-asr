@@ -11,30 +11,33 @@ from utils.optimizer import NoamOpt
 from utils.metrics import calculate_metrics, calculate_cer, calculate_wer
 from torch.autograd import Variable
 
-class Trainer():
+class TrainerCPT():
     """
-    Trainer class
+    TrainerCPT class
     """
-    def __init__(self):
+    def __init__(self, tokenizer):
         logging.info("Trainer is initialized")
+        self.tokenizer = tokenizer
 
-    def train_one_batch(self, model, vocab, src, trg, src_percentages, src_lengths, trg_lengths, smoothing, loss_type):
-        pred, gold, hyp = model(src, src_lengths, trg, verbose=False)
+    def train_one_batch(self, model, src, trg, src_percentages, src_lengths, trg_lengths, smoothing, loss_type):
+        pred, gold, hyp, non_pad_mask = model(src, src_lengths, trg, verbose=False)
         strs_golds, strs_hyps = [], []
 
         for j in range(len(gold)):
-            ut_gold = gold[j]
-            strs_golds.append("".join([vocab.id2label[int(x)] for x in ut_gold]))
+            ut_gold = gold[j].tolist()
+            strs_golds.append(self.tokenizer.decode(ut_gold))
         
         for j in range(len(hyp)):
-            ut_hyp = hyp[j]
-            strs_hyps.append("".join([vocab.id2label[int(x)] for x in ut_hyp]))
+            ut_hyp = hyp[j].tolist()
+            strs_hyps.append(self.tokenizer.decode(ut_hyp))
+
+        # print(pred.size())
 
         # handling the last batch
         seq_length = pred.size(1)
         sizes = src_percentages.mul_(int(seq_length)).int()
 
-        loss, num_correct = calculate_metrics(pred, gold, vocab.PAD_ID, input_lengths=sizes, target_lengths=trg_lengths, smoothing=smoothing, loss_type=loss_type)
+        loss, num_correct = calculate_metrics(pred, gold, -1, input_lengths=sizes, target_lengths=trg_lengths, non_pad_mask=non_pad_mask, smoothing=smoothing, loss_type=loss_type)
 
         if loss is None:
             print("loss is None")
@@ -46,8 +49,8 @@ class Trainer():
 
         total_cer, total_wer, total_char, total_word = 0, 0, 0, 0
         for j in range(len(strs_hyps)):
-            strs_hyps[j] = post_process(strs_hyps[j], vocab.special_token_list)
-            strs_golds[j] = post_process(strs_golds[j], vocab.special_token_list)
+#             print('hpys', strs_hyps[j])
+#             print('gold', strs_golds[j])
             cer = calculate_cer(strs_hyps[j].replace(' ', ''), strs_golds[j].replace(' ', ''))
             wer = calculate_wer(strs_hyps[j], strs_golds[j])
             total_cer += cer
@@ -57,7 +60,7 @@ class Trainer():
 
         return loss, total_cer, total_char
 
-    def train(self, model, vocab, train_loader, train_sampler, valid_loader_list, opt, loss_type, start_epoch, num_epochs, args, last_metrics=None, early_stop=10):
+    def train(self, model, train_loader, train_sampler, valid_loader_list, opt, loss_type, start_epoch, num_epochs, args, last_metrics=None, early_stop=10):
         """
         Training
         args:
@@ -103,7 +106,7 @@ class Trainer():
                     trg = trg.cuda()
 
                 start_time = time.time()
-                loss, cer, num_char = self.train_one_batch(model, vocab, src, trg, src_percentages, src_lengths, trg_lengths, smoothing, loss_type)
+                loss, cer, num_char = self.train_one_batch(model, src, trg, src_percentages, src_lengths, trg_lengths, smoothing, loss_type)
                 total_cer += cer
                 total_char += num_char
                 loss.backward()
@@ -120,46 +123,6 @@ class Trainer():
 
                 pbar.set_description("(Epoch {}) TRAIN LOSS:{:.4f} CER:{:.2f}% LR:{:.7f} TOTAL TIME:{:.7f}".format(
                     (epoch+1), total_loss/(i+1), total_cer*100/total_char, opt._rate, total_time))
-                # except Exception as e:
-                #     print(e)
-                #     # del loss
-                #     try:
-                #         torch.cuda.empty_cache()
-                #         src = src.cpu()
-                #         trg = trg.cpu()
-                #         src_splits, src_lengths_splits, trg_lengths_splits, trg_splits, src_percentages_splits = iter(src.split(2, dim=0)), iter(src_lengths.split(2, dim=0)), iter(trg_lengths.split(2, dim=0)), iter(trg.split(2, dim=0)), iter(src_percentages.split(2, dim=0))
-                #         j = 0
-
-                #         start_time = time.time()
-                #         for src, trg, src_lengths, trg_lengths, src_percentages in zip(src_splits, trg_splits, src_lengths_splits, trg_lengths_splits, src_percentages_splits):
-                #             opt.zero_grad()
-                #             torch.cuda.empty_cache()
-                #             if args.cuda:
-                #                 src = src.cuda()
-                #                 trg = trg.cuda()
-
-                #             start_time = time.time()
-                #             loss, cer, num_char = self.train_one_batch(model, vocab, src, trg, src_percentages, src_lengths, trg_lengths, smoothing, loss_type)
-                #             total_cer += cer
-                #             total_char += num_char
-                #             loss.backward()
-
-                #             if args.clip:
-                #                 torch.nn.utils.clip_grad_norm_(model.parameters(), args.max_norm)
-                            
-                #             opt.step()
-                #             total_loss += loss.item()
-                #             j += 1
-
-                #         end_time = time.time()
-                #         diff_time = end_time - start_time
-                #         total_time += diff_time
-                #         logging.info("probably OOM, autosplit batch. succeeded")
-                #         print("probably OOM, autosplit batch. succeeded")
-                #     except:
-                #         logging.info("probably OOM, autosplit batch. skip batch")
-                #         print("probably OOM, autosplit batch. skip batch")
-                #         continue
 
             pbar.set_description("(Epoch {}) TRAIN LOSS:{:.4f} CER:{:.2f}% LR:{:.7f} TOTAL TIME:{:.7f}".format((epoch+1), total_loss/(i+1), total_cer*100/total_char, opt._rate, total_time))
 
@@ -188,50 +151,17 @@ class Trainer():
                     torch.cuda.empty_cache()
 
                     src, trg, src_percentages, src_lengths, trg_lengths = data
-                    try:
+                    with torch.no_grad():
                         if args.cuda:
                             src = src.cuda()
                             trg = trg.cuda()
-                        loss, cer, num_char = self.train_one_batch(model, vocab, src, trg, src_percentages, src_lengths, trg_lengths, smoothing, loss_type)
+                        loss, cer, num_char = self.train_one_batch(model, src, trg, src_percentages, src_lengths, trg_lengths, smoothing, loss_type)
                         total_valid_cer += cer
                         total_valid_char += num_char
 
                         total_valid_loss += loss.item()
                         valid_pbar.set_description("VALID SET {} LOSS:{:.4f} CER:{:.2f}%".format(ind,
                             total_valid_loss/(i+1), total_valid_cer*100/total_valid_char))
-                        # valid_pbar.set_description("(Epoch {}) VALID LOSS:{:.4f} CER:{:.2f}% WER:{:.2f}%".format(
-                            # (epoch+1), total_valid_loss/(i+1), total_valid_cer*100/total_valid_char, total_valid_wer*100/total_valid_word))
-                    except:
-                        try:
-                            torch.cuda.empty_cache()
-                            src = src.cpu()
-                            trg = trg.cpu()
-                            src_splits, src_lengths_splits, trg_lengths_splits, trg_splits, trg_transcript_splits, src_percentages_splits = iter(src.split(2, dim=0)), iter(src_lengths.split(2, dim=0)), iter(trg_lengths.split(2, dim=0)), iter(trg.split(2, dim=0)), iter(trg_transcript.split(2, dim=0)), iter(src_percentages.split(2, dim=0))
-                            j = 0
-                            for src, trg, src_lengths, trg_lengths, src_percentages in zip(src_splits, trg_splits, src_lengths_splits, trg_lengths_splits, src_percentages_splits):
-                                opt.zero_grad()
-                                torch.cuda.empty_cache()
-                                if args.cuda:
-                                    src = src.cuda()
-                                    trg = trg.cuda()
-
-                                loss, cer, num_char = self.train_one_batch(model, vocab, src, trg, src_percentages, src_lengths, trg_lengths, smoothing, loss_type)
-                                total_valid_cer += cer
-                                total_valid_char += num_char
-
-                                if args.clip:
-                                    torch.nn.utils.clip_grad_norm_(model.parameters(), args.max_norm)
-                                
-                                total_valid_loss += loss.item()
-                                j += 1
-                            valid_pbar.set_description("VALID SET {} LOSS:{:.4f} CER:{:.2f}%".format(ind, total_valid_loss/(i+1), total_valid_cer*100/total_valid_char))
-
-                            logging.info("probably OOM, autosplit batch. succeeded")
-                            print("probably OOM, autosplit batch. succeeded")
-                        except:
-                            logging.info("probably OOM, autosplit batch. skip batch")
-                            print("probably OOM, autosplit batch. skip batch")
-                            continue
 
                 final_valid_loss = total_valid_loss/(len(valid_loader))
                 final_valid_cer = total_valid_cer*100/total_valid_char
@@ -259,16 +189,16 @@ class Trainer():
             logging.info("AVG VALID LOSS:{:.4f} AVG CER:{:.2f}%".format(sum(final_valid_losses) / len(final_valid_losses), sum(final_valid_cers) / len(final_valid_cers)))
 
             if epoch % args.save_every == 0:
-                save_model(model, vocab, (epoch+1), opt, metrics, args, best_model=False)
+                # save_model(model, self.tokenizer, (epoch+1), opt, metrics, args, best_model=False)
+                pass
 
             # save the best model
-            early_stop_criteria, early_stop_val
             if early_stop_criteria == "cer":
                 print("CRITERIA: CER")
                 if best_valid_val > avg_valid_cer:
                     count_stop = 0
                     best_valid_val = avg_valid_cer
-                    save_model(model, vocab, (epoch+1), opt, metrics, args, best_model=True)
+                    # save_model(model, self.tokenizer, (epoch+1), opt, metrics, args, best_model=True)
                 else:
                     print("count_stop:", count_stop)
                     count_stop += 1
@@ -277,7 +207,7 @@ class Trainer():
                 if best_valid_val > avg_valid_loss:
                     count_stop = 0
                     best_valid_val = avg_valid_loss
-                    save_model(model, vocab, (epoch+1), opt, metrics, args, best_model=True)
+                    # save_model(model, self.tokenizer, (epoch+1), opt, metrics, args, best_model=True)
                 else:
                     count_stop += 1
                     print("count_stop:", count_stop)

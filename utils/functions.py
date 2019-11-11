@@ -7,7 +7,11 @@ import numpy as np
 
 # from modules import CPT2LMHeadModel
 # from models.asr.transformer_cpt2 import TransformerCPT2, Encoder, Decoder
-from models.asr.transformer import Transformer, Encoder, Decoder
+from models.asr.transformer import Transformer
+from transformers import BertModel
+from modules import CPT2LMHeadModel, Encoder, Decoder
+from models.asr.transformer import Transformer
+from models.asr.transformer_cpt2 import TransformerCPT2
 from utils.optimizer import NoamOpt, AnnealingOpt
 
 def generate_labels(labels, special_token_list):
@@ -184,7 +188,7 @@ def init_transformer_model(args, vocab, train=True, is_factorized=False, r=100):
 
     return model
 
-def init_cpt2_model(args, tokenizer, pad_id, sos_id, eos_id, vocab, train=True, is_factorized=False, r=100, mha_block=[0,0,1,1,0,0]):
+def init_cpt2_model(args, tokenizer, pad_id, sos_id, eos_id, vocab, train=True, is_factorized=False, r=100, mha_block=[0,0,1,1,0,0], include_chinese=False):
     """
     Initiate a new transformer object
     """
@@ -227,16 +231,16 @@ def init_cpt2_model(args, tokenizer, pad_id, sos_id, eos_id, vocab, train=True, 
 
     # CPT2
     cpt2 = CPT2LMHeadModel.from_pretrained('distilgpt2', mha_block=mha_block)
-    bert_model = BertModel.from_pretrained('bert-base-chinese')
-    bert_word_embedding = bert_model.embeddings.word_embeddings
-    cpt2.extend_embedding(bert_word_embedding)
+    if include_chinese:
+        bert_model = BertModel.from_pretrained('bert-base-chinese')
+        bert_word_embedding = bert_model.embeddings.word_embeddings
+        cpt2.extend_embedding(bert_word_embedding)
     
     model = TransformerCPT2(encoder, cpt2, tokenizer, pad_id, sos_id, eos_id, vocab, feat_extractor=feat_extractor, train=train)
 
     return model
 
-def post_process(string, vocab):
-    special_token_list = vocab.special_token_list
+def post_process(string, special_token_list):
     for i in range(len(special_token_list)):
         string = string.replace(special_token_list[i],"")
     string = string.replace("▁"," ")

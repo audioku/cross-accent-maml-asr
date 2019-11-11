@@ -6,244 +6,11 @@ import numpy as np
 import math
 import os
 
-from modules.decoding import decode_greedy_search, decode_beam_search
-from modules.common_layers import FactorizedMultiHeadAttention, PositionalEncoding, PositionwiseFeedForward, FactorizedPositionwiseFeedForward, get_subsequent_mask, get_non_pad_mask, get_attn_key_pad_mask, get_attn_pad_mask, pad_list
+from .common_layers import FactorizedMultiHeadAttention, PositionalEncoding, PositionwiseFeedForward, FactorizedPositionwiseFeedForward, get_subsequent_mask, get_non_pad_mask, get_attn_key_pad_mask, get_attn_pad_mask, pad_list, pad_list_with_mask
+
 from torch.autograd import Variable
+from utils import constant
 from utils.metrics import calculate_metrics
-
-class Transformer(nn.Module):
-    """
-    Transformer class
-    args:
-        encoder: Encoder object
-        decoder: Decoder object
-    """
-
-    def __init__(self, encoder, decoder, vocab, feat_extractor='vgg_cnn', train=True, is_factorized=False, r=100):
-        super(Transformer, self).__init__()
-        self.encoder = encoder
-        self.decoder = decoder
-        self.vocab = vocab
-
-        self.feat_extractor = feat_extractor
-        self.is_factorized = is_factorized
-        self.r = r
-
-        print("feat extractor:", feat_extractor)
-
-        # feature embedding
-        self.conv = None
-        if feat_extractor == 'emb_cnn':
-            self.conv = nn.Sequential(
-                nn.Conv2d(1, 32, kernel_size=(41, 11), stride=(2, 2), padding=(0, 10)),
-                nn.BatchNorm2d(32),
-                nn.Hardtanh(0, 20, inplace=True),
-                nn.Conv2d(32, 32, kernel_size=(21, 11), stride=(2, 1), ),
-                nn.BatchNorm2d(32),
-                nn.Hardtanh(0, 20, inplace=True)
-            )
-        elif feat_extractor == 'vgg_cnn':
-            self.conv = nn.Sequential(
-                nn.Conv2d(1, 64, 3, stride=1, padding=1),
-                nn.ReLU(),
-                nn.Conv2d(64, 64, 3, stride=1, padding=1),
-                nn.ReLU(),
-                nn.MaxPool2d(2, stride=2),
-                nn.Conv2d(64, 128, 3, stride=1, padding=1),
-                nn.ReLU(),
-                nn.Conv2d(128, 128, 3, stride=1, padding=1),
-                nn.ReLU(),
-                nn.MaxPool2d(2, stride=2)
-            )
-        elif feat_extractor == "large_cnn":
-            self.conv = nn.Sequential(
-                nn.Conv2d(1, 32, 3, stride=1, padding=1),
-                nn.ReLU(),
-                nn.Conv2d(32, 32, 3, stride=1, padding=1),
-                nn.ReLU(),
-                nn.MaxPool2d(2, stride=2),
-                nn.Conv2d(32, 64, 3, stride=1, padding=1),
-                nn.ReLU(),
-                nn.Conv2d(64, 64, 3, stride=1, padding=1),
-                nn.ReLU(),
-                nn.MaxPool2d(2, stride=2)
-            )
-
-        for p in self.parameters():
-            if p.dim() > 1:
-                nn.init.xavier_uniform_(p)
-
-    def forward(self, padded_input, input_lengths, padded_target, verbose=False):
-        """
-        args:
-            padded_input: B x 1 (channel for spectrogram=1) x (freq) x T
-            padded_input: B x T x D
-            input_lengths: B
-            padded_target: B x T
-        output:
-            pred: B x T x vocab
-            gold: B x T
-        """
-        # try:                
-        if self.feat_extractor == 'emb_cnn' or self.feat_extractor == 'vgg_cnn' or self.feat_extractor == 'large_cnn':
-            padded_input = self.conv(padded_input)
-
-        # Reshaping features
-        sizes = padded_input.size() # B x H_1 (channel?) x H_2 x T
-        padded_input = padded_input.view(sizes[0], sizes[1] * sizes[2], sizes[3])
-        padded_input = padded_input.transpose(1, 2).contiguous()  # BxTxH
-        
-        encoder_padded_outputs, _ = self.encoder(padded_input, input_lengths)
-        pred_list, gold_list, *_ = self.decoder(padded_target, encoder_padded_outputs, input_lengths)
-
-        # hyp_list = []
-        # print(pred_list.size())
-        # print(gold_list.size())
-        hyp_best_scores, hyp_best_ids = torch.topk(pred_list, 1, dim=2)
-        hyp_list = hyp_best_ids.squeeze(2)
-        # print(hyp_list.size())
-        return pred_list, gold_list, hyp_list
-        # except:
-        #     torch.cuda.empty_cache()
-    
-    def decode_hyp(self, vocab, hyp):
-        """
-        args: 
-            hyp: list of hypothesis
-        output:
-            list of hypothesis (string)>
-        """
-        return "".join([vocab.id2label[int(x)] for x in hyp['yseq'][1:]])
-
-    def evaluate(self, padded_input, input_lengths, padded_target, args, beam_search=False, beam_width=0, beam_nbest=0, lm=None, lm_rescoring=False, lm_weight=0.1, c_weight=1, start_token=-1, verbose=False):
-        """
-        args:
-            padded_input: B x T x D
-            input_lengths: B
-            padded_target: B x T
-        output:
-            batch_ids_nbest_hyps: list of nbest id
-            batch_strs_nbest_hyps: list of nbest str
-            batch_strs_gold: list of gold str
-        """
-        if self.feat_extractor == 'emb_cnn' or self.feat_extractor == 'vgg_cnn' or self.feat_extractor == 'large_cnn':
-            padded_input = self.conv(padded_input)
-
-        # Reshaping features
-        sizes = padded_input.size() # B x H_1 (channel?) x H_2 x T
-        padded_input = padded_input.view(sizes[0], sizes[1] * sizes[2], sizes[3])
-        padded_input = padded_input.transpose(1, 2).contiguous()  # BxTxH
-
-        encoder_padded_outputs, _ = self.encoder(padded_input, input_lengths)
-        pred_list, gold_list, *_ = self.decoder(padded_target, encoder_padded_outputs, input_lengths)
-        strs_gold = ["".join([self.vocab.id2label[int(x)] for x in gold_seq]) for gold_seq in gold_list]
-
-        if beam_search:
-            # ids_hyps, strs_hyps = self.decoder.beam_search(self.vocab, encoder_padded_outputs, args, c_weight=c_weight, start_token=start_token)
-            ids_hyps, strs_hyps = decode_beam_search(self.decoder, self.vocab, encoder_padded_outputs, input_lengths, args, beam_width=beam_width, beam_nbest=beam_nbest, c_weight=1, start_token=start_token)
-            print(len(strs_hyps), sizes[0])
-            if len(strs_hyps) != sizes[0]:
-                print(">>>>>>> switch to greedy")
-                # strs_hyps = self.decoder.greedy_search(encoder_padded_outputs, args, start_token=start_token)
-                strs_hyps = decode_greedy_search(self.decoder, self.vocab, encoder_padded_outputs, input_lengths, args, c_weight=1, start_token=start_token)
-        else:
-            # strs_hyps = self.decoder.greedy_search(encoder_padded_outputs, args, start_token=start_token)
-            strs_hyps = decode_greedy_search(self.decoder, self.vocab, encoder_padded_outputs, input_lengths, args, c_weight=1, start_token=start_token)
-
-        return _, strs_hyps, strs_gold
-
-class Encoder(nn.Module):
-    """ 
-    Encoder Transformer class
-    """
-
-    def __init__(self, num_layers, num_heads, dim_model, dim_key, dim_value, dim_input, dim_inner, dropout=0.1, src_max_length=2500, is_factorized=False, r=100):
-        super(Encoder, self).__init__()
-
-        self.dim_input = dim_input
-        self.num_layers = num_layers
-        self.num_heads = num_heads
-
-        self.dim_model = dim_model
-        self.dim_key = dim_key
-        self.dim_value = dim_value
-        self.dim_inner = dim_inner
-
-        self.src_max_length = src_max_length
-
-        self.is_factorized = is_factorized
-        self.r = r
-
-        self.dropout = nn.Dropout(dropout)
-        self.dropout_rate = dropout
-
-        if is_factorized:
-            self.input_linear_a = nn.Linear(dim_input, r, bias=False)
-            self.input_linear_b = nn.Linear(r, dim_model)
-        else:
-            self.input_linear = nn.Linear(dim_input, dim_model)
-        self.layer_norm_input = nn.LayerNorm(dim_model)
-        self.positional_encoding = PositionalEncoding(
-            dim_model, src_max_length)
-
-        self.layers = nn.ModuleList([
-            EncoderLayer(num_heads, dim_model, dim_inner, dim_key, dim_value, dropout=dropout, is_factorized=is_factorized, r=r) for _ in range(num_layers)
-        ])
-
-    def forward(self, padded_input, input_lengths):
-        """
-        args:
-            padded_input: B x T x D
-            input_lengths: B
-        return:
-            output: B x T x H
-        """
-        encoder_self_attn_list = []
-
-        # Prepare masks
-        non_pad_mask = get_non_pad_mask(padded_input, input_lengths=input_lengths)  # B x T x D
-        seq_len = padded_input.size(1)
-        self_attn_mask = get_attn_pad_mask(padded_input, input_lengths, seq_len)  # B x T x T
-
-        if self.is_factorized:
-            encoder_output = self.layer_norm_input(self.input_linear_b(self.input_linear_a(
-                padded_input))) + self.positional_encoding(padded_input)
-        else:
-            encoder_output = self.layer_norm_input(self.input_linear(
-                padded_input)) + self.positional_encoding(padded_input)
-        
-        for layer in self.layers:
-            encoder_output, self_attn = layer(
-                encoder_output, non_pad_mask=non_pad_mask, self_attn_mask=self_attn_mask)
-            encoder_self_attn_list += [self_attn]
-
-        return encoder_output, encoder_self_attn_list
-
-
-class EncoderLayer(nn.Module):
-    """
-    Encoder Layer Transformer class
-    """
-
-    def __init__(self, num_heads, dim_model, dim_inner, dim_key, dim_value, dropout=0.1, is_factorized=False, r=100):
-        super(EncoderLayer, self).__init__()
-        self.is_factorized = is_factorized
-        self.r = r
-        self.self_attn = FactorizedMultiHeadAttention(num_heads, dim_model, dim_key, dim_value, dropout=dropout, r=r)
-        if is_factorized:
-            self.pos_ffn = FactorizedPositionwiseFeedForward(dim_model, dim_inner, dropout=dropout, r=r)
-        else:
-            self.pos_ffn = PositionwiseFeedForward(dim_model, dim_inner, dropout=dropout)
-
-    def forward(self, enc_input, non_pad_mask=None, self_attn_mask=None):
-        enc_output, self_attn = self.self_attn(
-            enc_input, enc_input, enc_input, mask=self_attn_mask)
-        enc_output *= non_pad_mask
-
-        enc_output = self.pos_ffn(enc_output)
-        enc_output *= non_pad_mask
-
-        return enc_output, self_attn
 
 class Decoder(nn.Module):
     """
@@ -336,17 +103,26 @@ class Decoder(nn.Module):
             decoder_self_attn_list += [decoder_self_attn]
             decoder_encoder_attn_list += [decoder_enc_attn]
 
-        final_decoded_output = self.output_linear(decoder_output)
-        final_gold = seq_out_pad
+        final_decoded_output = []
+        final_gold = []
 
-        # for i in range(len(decoder_output)):
-        #     final_decoded_output.append(self.output_linear(decoder_output[i].unsqueeze(0)).squeeze())
-        #     final_gold.append(seq_out_pad[i])
+        for i in range(len(decoder_output)):
+            final_decoded_output.append(self.output_linear(decoder_output[i].unsqueeze(0)).squeeze())
+            final_gold.append(seq_out_pad[i])
         
-        # final_decoded_output = torch.stack(final_decoded_output, dim=0)
-        # final_gold = torch.stack(final_gold, dim=0)
+        final_decoded_output = torch.stack(final_decoded_output, dim=0)
+        final_gold = torch.stack(final_gold, dim=0)
 
         return final_decoded_output, final_gold, decoder_self_attn_list, decoder_encoder_attn_list
+
+    def post_process_hyp(self, hyp):
+        """
+        args: 
+            hyp: list of hypothesis
+        output:
+            list of hypothesis (string)>
+        """
+        return "".join([self.src_id2label[int(x)] for x in hyp['yseq'][1:]])
 
     def greedy_search(self, encoder_padded_outputs, args, beam_width=2, lm_rescoring=False, lm=None, lm_weight=0.1, c_weight=1, start_token=-1):
         """
@@ -403,16 +179,7 @@ class Decoder(nn.Module):
             sent.append(st)
         return sent
 
-    def decode_hyp(self, vocab, hyp):
-        """
-        args: 
-            hyp: list of hypothesis
-        output:
-            list of hypothesis (string)>
-        """
-        return "".join([vocab.id2label[int(x)] for x in hyp['yseq'][1:]])
-
-    def beam_search(self, vocab, encoder_padded_outputs, args, beam_width=2, nbest=5, lm_rescoring=False, lm=None, lm_weight=0.1, c_weight=1, prob_weight=1.0, start_token=-1):
+    def beam_search(self, encoder_padded_outputs, args, beam_width=2, nbest=5, lm_rescoring=False, lm=None, lm_weight=0.1, c_weight=1, prob_weight=1.0, start_token=-1):
         """
         Beam search, decode nbest utterances
         args:
@@ -472,7 +239,7 @@ class Decoder(nn.Module):
                         new_word = int(local_best_ids[0, j])
 
                         # convert target index to source index
-                        new_word = torch.LongTensor([new_word]).cuda()
+                        new_word = torch.LongTensor([self.vocab.id2label[new_word]]).cuda()
                         new_hyp["yseq"][:, ys.size(1)] = new_word # adding new word
                         hyps_best_kept.append(new_hyp)
                     hyps_best_kept = sorted(hyps_best_kept, key=lambda x:x["score"], reverse=True)[:beam_width]
@@ -482,13 +249,13 @@ class Decoder(nn.Module):
                 # add EOS_TOKEN
                 if i == max_len - 1:
                     for hyp in hyps:
-                        hyp["yseq"] = torch.cat([hyp["yseq"], torch.ones(1,1).fill_(vocab.EOS_ID).type_as(encoder_output).long()], dim=1)
+                        hyp["yseq"] = torch.cat([hyp["yseq"], torch.ones(1,1).fill_(self.args.EOS_ID).type_as(encoder_output).long()], dim=1)
 
                 # add hypothesis that have EOS_ID to ended_hyps list
                 unended_hyps = []
                 for hyp in hyps:
-                    if hyp["yseq"][0, -1] == vocab.EOS_ID:
-                        seq_str = "".join(vocab.id2label[char.item()] for char in hyp["yseq"][0]).replace(vocab.PAD_TOKEN,"").replace(vocab.SOS_TOKEN,"").replace(self.vocab.EOS_TOKEN,"")
+                    if hyp["yseq"][0, -1] == self.args.EOS_ID:
+                        seq_str = "".join(self.vocab.id2label[char.item()] for char in hyp["yseq"][0]).replace(self.vocab.PAD_TOKEN,"").replace(self.vocab.SOS_TOKEN,"").replace(self.vocab.EOS_TOKEN,"")
                         seq_str = seq_str.replace("  ", " ")
                         num_words = len(seq_str.split())
                         hyp["final_score"] = hyp["score"] + math.sqrt(num_words) * c_weight
@@ -509,7 +276,7 @@ class Decoder(nn.Module):
 
             for hyp in nbest_hyps:                
                 hyp["yseq"] = hyp["yseq"][0].cpu().numpy().tolist()
-                hyp_strs = self.decode_hyp(vocab, hyp)
+                hyp_strs = self.post_process_hyp(hyp)
                 batch_ids_nbest_hyps.append(hyp["yseq"])
                 batch_strs_nbest_hyps.append(hyp_strs)
                 # print(hyp["yseq"], hyp_strs)
@@ -545,4 +312,4 @@ class DecoderLayer(nn.Module):
         decoder_output = self.pos_ffn(decoder_output)
         decoder_output *= non_pad_mask
 
-        return decoder_output, decoder_self_attn, decoder_encoder_attn
+        return decoder_output, decoder_self_attn, decoder_encoder_attn        

@@ -156,7 +156,7 @@ if __name__ == '__main__':
     elif args.feat == "logfbank":
         train_data = LogFBankDataset(vocab, args, audio_conf, manifest_filepath_list=args.train_manifest_list, normalize=True, augment=args.augment, input_type=args.input_type, is_train=True)
     train_sampler = BucketingSampler(train_data, batch_size=args.batch_size)
-    train_loader = AudioDataLoader(vocab, dataset=train_data, num_workers=args.num_workers, batch_sampler=train_sampler)
+    train_loader = AudioDataLoader(pad_token_id=0, dataset=train_data, num_workers=args.num_workers, batch_sampler=train_sampler)
 
     valid_loader_list, test_loader_list = [], []
     for i in range(len(args.valid_manifest_list)):
@@ -165,7 +165,7 @@ if __name__ == '__main__':
         elif args.feat == "logfbank":
             valid_data = LogFBankDataset(vocab, args, audio_conf, manifest_filepath_list=[args.valid_manifest_list[i]], normalize=True, augment=False, input_type=args.input_type)
         valid_sampler = BucketingSampler(valid_data, batch_size=args.batch_size)
-        valid_loader = AudioDataLoader(vocab, dataset=valid_data, num_workers=args.num_workers)
+        valid_loader = AudioDataLoader(pad_token_id=0, dataset=valid_data, num_workers=args.num_workers)
         valid_loader_list.append(valid_loader)
 
     start_epoch = 0

@@ -234,3 +234,4 @@ if __name__ == '__main__':
         print(dec)
         print('====')
         print(cn_en_tokenizer.gpt2_en_tokenizer.encoder['<|endoftext|>'], cn_en_tokenizer.eos_token_id)
+        print('|'.join(list(cn_en_tokenizer.gpt2_en_tokenizer.encoder.keys())[100:200]))
