@@ -7,6 +7,7 @@ import math
 import kenlm
 import os
 
+from modules.decoding import decode_greedy_search, decode_beam_search
 from modules.common_layers import FactorizedMultiHeadAttention, PositionalEncoding, PositionwiseFeedForward, FactorizedPositionwiseFeedForward, get_subsequent_mask, get_non_pad_mask, get_attn_key_pad_mask, get_attn_pad_mask, pad_list
 from torch.autograd import Variable
 from utils.metrics import calculate_metrics
@@ -139,12 +140,16 @@ class Transformer(nn.Module):
         strs_gold = ["".join([self.vocab.id2label[int(x)] for x in gold_seq]) for gold_seq in gold_list]
 
         if beam_search:
-            ids_hyps, strs_hyps = self.decoder.beam_search(encoder_padded_outputs, args, beam_width=beam_width, nbest=1, lm=lm, lm_rescoring=lm_rescoring, lm_weight=lm_weight, c_weight=c_weight, start_token=start_token)
+            # ids_hyps, strs_hyps = self.decoder.beam_search(self.vocab, encoder_padded_outputs, args, c_weight=c_weight, start_token=start_token)
+            ids_hyps, strs_hyps = decode_beam_search(self.decoder, self.vocab, encoder_padded_outputs, input_lengths, args, beam_width=beam_width, beam_nbest=beam_nbest, c_weight=1, start_token=start_token)
+            print(len(strs_hyps), sizes[0])
             if len(strs_hyps) != sizes[0]:
                 print(">>>>>>> switch to greedy")
-                strs_hyps = self.decoder.greedy_search(encoder_padded_outputs, args, start_token=start_token)
+                # strs_hyps = self.decoder.greedy_search(encoder_padded_outputs, args, start_token=start_token)
+                strs_hyps = decode_greedy_search(self.decoder, self.vocab, encoder_padded_outputs, input_lengths, args, c_weight=1, start_token=start_token)
         else:
-            strs_hyps = self.decoder.greedy_search(encoder_padded_outputs, args, start_token=start_token)
+            # strs_hyps = self.decoder.greedy_search(encoder_padded_outputs, args, start_token=start_token)
+            strs_hyps = decode_greedy_search(self.decoder, self.vocab, encoder_padded_outputs, input_lengths, args, c_weight=1, start_token=start_token)
 
         return _, strs_hyps, strs_gold
 
@@ -399,7 +404,16 @@ class Decoder(nn.Module):
             sent.append(st)
         return sent
 
-    def beam_search(self, encoder_padded_outputs, args, beam_width=2, nbest=5, lm_rescoring=False, lm=None, lm_weight=0.1, c_weight=1, prob_weight=1.0, start_token=-1):
+    def decode_hyp(self, vocab, hyp):
+        """
+        args: 
+            hyp: list of hypothesis
+        output:
+            list of hypothesis (string)>
+        """
+        return "".join([vocab.id2label[int(x)] for x in hyp['yseq'][1:]])
+
+    def beam_search(self, vocab, encoder_padded_outputs, args, beam_width=2, nbest=5, lm_rescoring=False, lm=None, lm_weight=0.1, c_weight=1, prob_weight=1.0, start_token=-1):
         """
         Beam search, decode nbest utterances
         args:
@@ -459,7 +473,7 @@ class Decoder(nn.Module):
                         new_word = int(local_best_ids[0, j])
 
                         # convert target index to source index
-                        new_word = torch.LongTensor([self.vocab.id2label[new_word]]).cuda()
+                        new_word = torch.LongTensor([new_word]).cuda()
                         new_hyp["yseq"][:, ys.size(1)] = new_word # adding new word
                         hyps_best_kept.append(new_hyp)
                     hyps_best_kept = sorted(hyps_best_kept, key=lambda x:x["score"], reverse=True)[:beam_width]
@@ -469,13 +483,13 @@ class Decoder(nn.Module):
                 # add EOS_TOKEN
                 if i == max_len - 1:
                     for hyp in hyps:
-                        hyp["yseq"] = torch.cat([hyp["yseq"], torch.ones(1,1).fill_(self.args.EOS_ID).type_as(encoder_output).long()], dim=1)
+                        hyp["yseq"] = torch.cat([hyp["yseq"], torch.ones(1,1).fill_(vocab.EOS_ID).type_as(encoder_output).long()], dim=1)
 
                 # add hypothesis that have EOS_ID to ended_hyps list
                 unended_hyps = []
                 for hyp in hyps:
-                    if hyp["yseq"][0, -1] == self.args.EOS_ID:
-                        seq_str = "".join(self.vocab.id2label[char.item()] for char in hyp["yseq"][0]).replace(self.vocab.PAD_TOKEN,"").replace(self.vocab.SOS_TOKEN,"").replace(self.vocab.EOS_TOKEN,"")
+                    if hyp["yseq"][0, -1] == vocab.EOS_ID:
+                        seq_str = "".join(vocab.id2label[char.item()] for char in hyp["yseq"][0]).replace(vocab.PAD_TOKEN,"").replace(vocab.SOS_TOKEN,"").replace(self.vocab.EOS_TOKEN,"")
                         seq_str = seq_str.replace("  ", " ")
                         num_words = len(seq_str.split())
                         hyp["final_score"] = hyp["score"] + math.sqrt(num_words) * c_weight
@@ -496,7 +510,7 @@ class Decoder(nn.Module):
 
             for hyp in nbest_hyps:                
                 hyp["yseq"] = hyp["yseq"][0].cpu().numpy().tolist()
-                hyp_strs = self.decode_hyp(hyp)
+                hyp_strs = self.decode_hyp(vocab, hyp)
                 batch_ids_nbest_hyps.append(hyp["yseq"])
                 batch_strs_nbest_hyps.append(hyp_strs)
                 # print(hyp["yseq"], hyp_strs)

@@ -108,7 +108,7 @@ torch.cuda.manual_seed_all(123456)
 args = parser.parse_args()
 USE_CUDA = args.cuda
 
-def evaluate(model, vocab, test_loader, lm=None, special_token_list=[], start_token=-1):
+def evaluate(model, vocab, test_loader, args, start_token=-1):
     """
     Evaluation
     args:
@@ -133,7 +133,7 @@ def evaluate(model, vocab, test_loader, lm=None, special_token_list=[], start_to
 
             start_time = time.time()
             batch_ids_hyps, batch_strs_hyps, batch_strs_gold = model.evaluate(
-                src, src_lengths, trg, args, beam_search=args.beam_search, beam_width=args.beam_width, beam_nbest=args.beam_nbest, lm=lm, lm_rescoring=args.lm_rescoring, lm_weight=args.lm_weight, c_weight=args.c_weight, start_token=start_token, verbose=args.verbose)
+                src, src_lengths, trg, args, beam_search=args.beam_search, beam_width=args.beam_width, beam_nbest=args.beam_nbest, c_weight=args.c_weight, start_token=start_token, verbose=args.verbose)
 
             for x in range(len(batch_strs_gold)):
                 hyp = post_process(batch_strs_hyps[x], vocab)
@@ -193,7 +193,7 @@ if __name__ == '__main__':
     elif loaded_args.feat == "logfbank":
         test_data = LogFBankDataset(vocab, args, audio_conf=audio_conf, manifest_filepath_list=[test_manifest_list[0]], normalize=True, augment=False, input_type=args.input_type)
     test_sampler = BucketingSampler(test_data, batch_size=args.batch_size)
-    test_loader = AudioDataLoader(test_data, num_workers=args.num_workers, batch_sampler=test_sampler)
+    test_loader = AudioDataLoader(vocab, dataset=test_data, num_workers=args.num_workers, batch_sampler=test_sampler)
 
     lm = None
     # if args.lm_rescoring:
@@ -206,4 +206,4 @@ if __name__ == '__main__':
     if not args.cuda:
         model = model.cpu()
 
-    evaluate(model, vocab, test_loader, lm=lm, start_token=vocab.SOS_ID)
+    evaluate(model, vocab, test_loader, args, start_token=vocab.SOS_ID)

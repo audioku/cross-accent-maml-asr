@@ -30,8 +30,6 @@ class Trainer():
             ut_hyp = hyp[j]
             strs_hyps.append("".join([vocab.id2label[int(x)] for x in ut_hyp]))
 
-        # print(pred.size())
-
         # handling the last batch
         seq_length = pred.size(1)
         sizes = src_percentages.mul_(int(seq_length)).int()

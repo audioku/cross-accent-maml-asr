@@ -480,9 +480,6 @@ class AudioDataLoader(DataLoader):
             def func_trg(p):
                 return len(p[1])
 
-            def func_trg_transcript(p):
-                return len(p[2])
-
             # descending sorted
             batch = sorted(batch, key=lambda sample: sample[0].size(1), reverse=True)
 
