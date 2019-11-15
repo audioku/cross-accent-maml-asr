@@ -45,6 +45,10 @@ class MetaTrainer():
             print("Found infinity loss, masking")
             loss = torch.where(loss != loss, torch.zeros_like(loss), loss) # NaN masking
 
+        # if verbose:
+        #     print(">PRED:", strs_hyps)
+        #     print(">GOLD:", strs_golds)
+
         total_cer, total_wer, total_char, total_word = 0, 0, 0, 0
         for j in range(len(strs_hyps)):
             strs_hyps[j] = post_process(strs_hyps[j], vocab.special_token_list)
@@ -104,6 +108,7 @@ class MetaTrainer():
             total_loss, total_cer = 0, 0
             total_char = 0
 
+            # print("before:", model.encoder.input_linear.weight)
             for manifest_id in range(len(train_data_list)):
                 torch.cuda.empty_cache()
 
@@ -150,6 +155,7 @@ class MetaTrainer():
 
                 # reset
                 model.load_state_dict({ name: weights_original[name] for name in weights_original })
+                # print("inner:", model.encoder.input_linear.weight)
 
             # outer loop optimization
             outer_opt.zero_grad()

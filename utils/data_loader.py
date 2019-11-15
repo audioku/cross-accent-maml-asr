@@ -265,6 +265,7 @@ class SpectrogramDataset(Dataset, SpectrogramParser):
 
             tr_spect.append(spect)
             tr_transcript.append(transcript)
+            print(">>>", transcript)
         
         for i in range(len(val_ids)):
             ids = self.ids_list[manifest_id]
