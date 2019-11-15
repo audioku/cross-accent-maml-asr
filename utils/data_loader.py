@@ -453,7 +453,6 @@ class AudioDataLoader(DataLoader):
     def __init__(self, pad_token_id, *args, **kwargs):
         super(AudioDataLoader, self).__init__(*args, **kwargs)
         self.pad_token_id = pad_token_id
-        self.collate_fn = self.collate_function
     
         def _collate_fn(batch):
             def func(p):

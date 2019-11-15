@@ -5,7 +5,7 @@ import logging
 import sys
 
 from tqdm import tqdm
-from utils import constant
+# from utils import constant
 from utils.functions import save_model, post_process
 from utils.optimizer import NoamOpt
 from utils.metrics import calculate_metrics, calculate_cer, calculate_wer

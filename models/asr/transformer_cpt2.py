@@ -9,7 +9,7 @@ import os
 from modules.common_layers import FactorizedMultiHeadAttention, PositionalEncoding, PositionwiseFeedForward, FactorizedPositionwiseFeedForward, get_subsequent_mask, get_non_pad_mask, get_attn_key_pad_mask, get_attn_pad_mask, pad_list_with_mask
 
 from torch.autograd import Variable
-from utils import constant
+# from utils import constant
 from utils.metrics import calculate_metrics
 
 class TransformerCPT2(nn.Module):
