@@ -233,6 +233,94 @@ class SpectrogramDataset(Dataset, SpectrogramParser):
         super(SpectrogramDataset, self).__init__(
             audio_conf, normalize, augment)
 
+    def uniform_shuffle(self, arr):
+        for i in range(len(arr)):
+            index = random.randint(0, i)
+            arr[i], arr[index] = arr[index], arr[i]
+        return arr
+
+    def sample(self, k_train, k_val, manifest_id):
+        def func(p):
+            return p.size(1)
+
+        def func_trg(p):
+            return len(p)
+
+        indices = [k for k in range(len(self.ids_list[manifest_id]))]
+        shuffled_indices = self.uniform_shuffle(indices)
+        tr_ids = shuffled_indices[:k_train]
+        val_ids = shuffled_indices[k_train:k_train+k_val]
+        print("train:",tr_ids)
+        print("val:",val_ids)
+        
+        tr_spect, tr_transcript = [], []
+        val_spect, val_transcript = [], []
+
+        for i in range(len(tr_ids)):
+            ids = self.ids_list[manifest_id]
+            sample = ids[tr_ids[i] % len(tr_ids)]
+            audio_path, transcript_path = sample[0], sample[1]
+            spect = self.parse_audio(audio_path)[:,:self.args.src_max_len]
+            transcript = self.parse_transcript(transcript_path)
+
+            tr_spect.append(spect)
+            tr_transcript.append(transcript)
+            print(">>>", transcript)
+        
+        for i in range(len(val_ids)):
+            ids = self.ids_list[manifest_id]
+            sample = ids[val_ids[i] % len(val_ids)]
+            audio_path, transcript_path = sample[0], sample[1]
+            spect = self.parse_audio(audio_path)[:,:self.args.src_max_len]
+            transcript = self.parse_transcript(transcript_path)
+
+            val_spect.append(spect)
+            val_transcript.append(transcript)
+
+        # pad training data
+        tr_max_seq_len = max(tr_spect, key=func).size(1)
+        tr_max_freq_len = max(tr_spect, key=func).size(0)
+        tr_max_trg_len = len(max(tr_transcript, key=func_trg))
+
+        tr_inputs = torch.zeros(len(tr_spect), 1, tr_max_freq_len, tr_max_seq_len)
+        tr_input_sizes = torch.IntTensor(len(tr_spect))
+        tr_input_percentages = torch.FloatTensor(len(tr_spect))
+        tr_targets = torch.full((len(tr_transcript), tr_max_trg_len), self.vocab.PAD_ID).long()
+        tr_target_sizes = torch.IntTensor(len(tr_transcript))
+
+        for x in range(len(tr_spect)):
+            input_data = tr_spect[x]
+            target = tr_transcript[x]
+            seq_length = input_data.size(1)
+            tr_input_sizes[x] = seq_length
+            tr_inputs[x][0].narrow(1, 0, seq_length).copy_(input_data)
+            tr_input_percentages[x] = seq_length / tr_max_seq_len
+            tr_target_sizes[x] = len(target)
+            tr_targets[x][:len(target)] = torch.IntTensor(target)
+
+        # pad valid data
+        val_max_seq_len = max(val_spect, key=func).size(1)
+        val_max_freq_len = max(val_spect, key=func).size(0)
+        val_max_trg_len = len(max(val_transcript, key=func_trg))
+
+        val_inputs = torch.zeros(len(val_spect), 1, val_max_freq_len, val_max_seq_len)
+        val_input_sizes = torch.IntTensor(len(val_spect))
+        val_input_percentages = torch.FloatTensor(len(val_spect))
+        val_targets = torch.full((len(val_transcript), val_max_trg_len), self.vocab.PAD_ID).long()
+        val_target_sizes = torch.IntTensor(len(val_transcript))
+
+        for x in range(len(val_spect)):
+            input_data = val_spect[x]
+            target = val_transcript[x]
+            seq_length = input_data.size(1)
+            val_input_sizes[x] = seq_length
+            val_inputs[x][0].narrow(1, 0, seq_length).copy_(input_data)
+            val_input_percentages[x] = seq_length / val_max_seq_len
+            val_target_sizes[x] = len(target)
+            val_targets[x][:len(target)] = torch.IntTensor(target)
+
+        return (tr_inputs, tr_input_sizes, tr_input_percentages, tr_targets, tr_target_sizes), (val_inputs, val_input_sizes, val_input_percentages, val_targets, val_target_sizes)
+
     def __getitem__(self, index):
         if self.is_train:
             manifest_id = index % len(self.manifest_filepath_list)
@@ -333,7 +421,7 @@ class CPT2LogFBankDataset(Dataset):
         with open(transcript_path, 'r', encoding='utf8') as transcript_file:
             cur_transcript = " " + transcript_file.read().replace('\n', '').lower()
         bpes = self.tokenizer.encode(cur_transcript)
-        return transcript
+        return bpes
 
     def __len__(self):
         return self.max_size
