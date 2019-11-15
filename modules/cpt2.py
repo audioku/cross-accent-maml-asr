@@ -239,7 +239,7 @@ class CPT2Model(GPT2Model):
             past_length = past[0][0].size(-2)
         if position_ids is None:
             position_ids = torch.arange(past_length, input_ids.size(-1) + past_length, dtype=torch.long, device=input_ids.device)
-            position_ids = position_ids.unsqueeze(0).expand_as(input_ids)
+            position_ids = position_ids.unsqueeze(0).expand_as(input_ids)            
 
         # Attention mask.
         if attention_mask is not None:
@@ -275,6 +275,13 @@ class CPT2Model(GPT2Model):
         hidden_states = first_hidden_states
         hidden_states = self.drop(hidden_states)
 
+#         if key is not None and value is not None:
+#             # Add positional embedding to key value
+#             kv_position_ids = torch.arange(0, key.shape[1], dtype=torch.long, device=input_ids.device)
+#             kv_position_ids = kv_position_ids.unsqueeze(0).unsqueeze(-1).expand_as(key) 
+#             key = key + kv_position_ids
+#             value = key
+            
         output_shape = input_shape + (hidden_states.size(-1),)
 
         presents = ()

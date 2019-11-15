@@ -104,6 +104,7 @@ parser.add_argument('--dropout', default=0.1, type=float, help='Dropout')
 
 # shuffle
 parser.add_argument('--shuffle', action='store_true', help='Shuffle')
+parser.add_argument('--include-chinese', action='store_true', help='Chinese embedding')
 
 # Post-training factorization
 parser.add_argument('--rank', default=10, type=float, help="rank")
@@ -196,7 +197,7 @@ if __name__ == '__main__':
         verbose = args.verbose
     else:
         if args.model == "TRFS":
-            model = init_cpt2_model(args, cn_en_tokenizer, pad_id, sos_id, eos_id, vocab, is_factorized=args.is_factorized, r=args.r, mha_block=mha_block, include_chinese=False)
+            model = init_cpt2_model(args, cn_en_tokenizer, pad_id, sos_id, eos_id, vocab, is_factorized=args.is_factorized, r=args.r, mha_block=mha_block, include_chinese=args.include_chinese)
             opt = init_optimizer(args, model, "noam")
         else:
             logging.info("The model is not supported, check args --h")
