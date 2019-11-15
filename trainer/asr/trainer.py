@@ -67,7 +67,6 @@ class Trainer():
             opt: Optimizer object
             start_epoch: start epoch (> 0 if you resume the process)
             num_epochs: last epoch
-            last_metrics: (if resume)
         """
         history = []
         best_valid_val = 1000000000
@@ -97,69 +96,69 @@ class Trainer():
 
                 opt.zero_grad()
 
-                # try:
-                if args.cuda:
-                    src = src.cuda()
-                    trg = trg.cuda()
+                try:
+                    if args.cuda:
+                        src = src.cuda()
+                        trg = trg.cuda()
 
-                start_time = time.time()
-                loss, cer, num_char = self.train_one_batch(model, vocab, src, trg, src_percentages, src_lengths, trg_lengths, smoothing, loss_type)
-                total_cer += cer
-                total_char += num_char
-                loss.backward()
+                    start_time = time.time()
+                    loss, cer, num_char = self.train_one_batch(model, vocab, src, trg, src_percentages, src_lengths, trg_lengths, smoothing, loss_type)
+                    total_cer += cer
+                    total_char += num_char
+                    loss.backward()
 
-                if args.clip:
-                    torch.nn.utils.clip_grad_norm_(model.parameters(), args.max_norm)
-                
-                opt.step()
-                total_loss += loss.item()
+                    if args.clip:
+                        torch.nn.utils.clip_grad_norm_(model.parameters(), args.max_norm)
+                    
+                    opt.step()
+                    total_loss += loss.item()
 
-                end_time = time.time()
-                diff_time = end_time - start_time
-                total_time += diff_time
+                    end_time = time.time()
+                    diff_time = end_time - start_time
+                    total_time += diff_time
 
-                pbar.set_description("(Epoch {}) TRAIN LOSS:{:.4f} CER:{:.2f}% LR:{:.7f} TOTAL TIME:{:.7f}".format(
-                    (epoch+1), total_loss/(i+1), total_cer*100/total_char, opt._rate, total_time))
-                # except Exception as e:
-                #     print(e)
-                #     # del loss
-                #     try:
-                #         torch.cuda.empty_cache()
-                #         src = src.cpu()
-                #         trg = trg.cpu()
-                #         src_splits, src_lengths_splits, trg_lengths_splits, trg_splits, src_percentages_splits = iter(src.split(2, dim=0)), iter(src_lengths.split(2, dim=0)), iter(trg_lengths.split(2, dim=0)), iter(trg.split(2, dim=0)), iter(src_percentages.split(2, dim=0))
-                #         j = 0
+                    pbar.set_description("(Epoch {}) TRAIN LOSS:{:.4f} CER:{:.2f}% LR:{:.7f} TOTAL TIME:{:.7f}".format(
+                        (epoch+1), total_loss/(i+1), total_cer*100/total_char, opt._rate, total_time))
+                except Exception as e:
+                    print(e)
+                    # del loss
+                    try:
+                        torch.cuda.empty_cache()
+                        src = src.cpu()
+                        trg = trg.cpu()
+                        src_splits, src_lengths_splits, trg_lengths_splits, trg_splits, src_percentages_splits = iter(src.split(2, dim=0)), iter(src_lengths.split(2, dim=0)), iter(trg_lengths.split(2, dim=0)), iter(trg.split(2, dim=0)), iter(src_percentages.split(2, dim=0))
+                        j = 0
 
-                #         start_time = time.time()
-                #         for src, trg, src_lengths, trg_lengths, src_percentages in zip(src_splits, trg_splits, src_lengths_splits, trg_lengths_splits, src_percentages_splits):
-                #             opt.zero_grad()
-                #             torch.cuda.empty_cache()
-                #             if args.cuda:
-                #                 src = src.cuda()
-                #                 trg = trg.cuda()
+                        start_time = time.time()
+                        for src, trg, src_lengths, trg_lengths, src_percentages in zip(src_splits, trg_splits, src_lengths_splits, trg_lengths_splits, src_percentages_splits):
+                            opt.zero_grad()
+                            torch.cuda.empty_cache()
+                            if args.cuda:
+                                src = src.cuda()
+                                trg = trg.cuda()
 
-                #             start_time = time.time()
-                #             loss, cer, num_char = self.train_one_batch(model, vocab, src, trg, src_percentages, src_lengths, trg_lengths, smoothing, loss_type)
-                #             total_cer += cer
-                #             total_char += num_char
-                #             loss.backward()
+                            start_time = time.time()
+                            loss, cer, num_char = self.train_one_batch(model, vocab, src, trg, src_percentages, src_lengths, trg_lengths, smoothing, loss_type)
+                            total_cer += cer
+                            total_char += num_char
+                            loss.backward()
 
-                #             if args.clip:
-                #                 torch.nn.utils.clip_grad_norm_(model.parameters(), args.max_norm)
+                            if args.clip:
+                                torch.nn.utils.clip_grad_norm_(model.parameters(), args.max_norm)
                             
-                #             opt.step()
-                #             total_loss += loss.item()
-                #             j += 1
+                            opt.step()
+                            total_loss += loss.item()
+                            j += 1
 
-                #         end_time = time.time()
-                #         diff_time = end_time - start_time
-                #         total_time += diff_time
-                #         logging.info("probably OOM, autosplit batch. succeeded")
-                #         print("probably OOM, autosplit batch. succeeded")
-                #     except:
-                #         logging.info("probably OOM, autosplit batch. skip batch")
-                #         print("probably OOM, autosplit batch. skip batch")
-                #         continue
+                        end_time = time.time()
+                        diff_time = end_time - start_time
+                        total_time += diff_time
+                        logging.info("probably OOM, autosplit batch. succeeded")
+                        print("probably OOM, autosplit batch. succeeded")
+                    except:
+                        logging.info("probably OOM, autosplit batch. skip batch")
+                        print("probably OOM, autosplit batch. skip batch")
+                        continue
 
             pbar.set_description("(Epoch {}) TRAIN LOSS:{:.4f} CER:{:.2f}% LR:{:.7f} TOTAL TIME:{:.7f}".format((epoch+1), total_loss/(i+1), total_cer*100/total_char, opt._rate, total_time))
 

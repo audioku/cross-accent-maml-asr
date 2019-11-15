@@ -41,6 +41,37 @@ def compute_num_params(model):
     sizes = [(np.array(p.data.size()).prod(), int(p.requires_grad)) for p in model.parameters()]
     return sum(map(lambda t: t[0]*t[1], sizes)), sum(map(lambda t: t[0]*(1 - t[1]), sizes))
 
+def save_meta_model(model, vocab, epoch, inner_opt, outer_opt, metrics, args, best_model=False):
+    """
+    Saving model, TODO adding history
+    """
+    if best_model:
+        save_path = "{}/{}/best_model.th".format(
+            args.save_folder, args.name)
+    else:
+        save_path = "{}/{}/epoch_{}.th".format(args.save_folder,
+                                               args.name, epoch)
+
+    if not os.path.exists(args.save_folder + "/" + args.name):
+        os.makedirs(args.save_folder + "/" + args.name)
+
+    print("SAVE MODEL to", save_path)
+    logging.info("SAVE MODEL to " + save_path)
+    if args.loss == "ce":
+        args = {
+            'vocab': vocab,
+            'args': args,
+            'epoch': epoch,
+            'model_state_dict': model.state_dict(),
+            'inner_opt': inner_opt,
+            'outer_opt': outer_opt,
+            'metrics': metrics
+        }
+    else:
+        print("Loss is not defined")
+        logging.info("Loss is not defined")
+    torch.save(args, save_path)
+
 def save_model(model, vocab, epoch, opt, metrics, args, best_model=False):
     """
     Saving model, TODO adding history
@@ -78,6 +109,39 @@ def save_model(model, vocab, epoch, opt, metrics, args, best_model=False):
         logging.info("Loss is not defined")
     torch.save(args, save_path)
 
+def load_meta_model(load_path, train=True):
+    """
+    Loading model
+    args:
+        load_path: string
+    """
+    checkpoint = torch.load(load_path, map_location=torch.device('cpu'))
+
+    epoch = checkpoint['epoch']
+    metrics = checkpoint['metrics']
+    if 'args' in checkpoint:
+        args = checkpoint['args']
+
+    vocab = checkpoint['vocab']
+    is_factorized = args.is_factorized
+    r = args.r
+
+    # args.feat_extractor = "vgg_cnn"
+    args.k_lr = 1
+    args.min_lr = 1e-6
+
+    model = init_transformer_model(args, vocab, train=train, is_factorized=is_factorized, r=r)
+    model.load_state_dict(checkpoint['model_state_dict'])
+    if args.cuda:
+        print("CUDA")
+        model = model.cuda()
+    else:
+        model = model.cpu()
+
+    inner_opt = checkpoint['inner_opt']
+    outer_opt = checkpoint['outer_opt']
+
+    return model, vocab, inner_opt, outer_opt, epoch, metrics, args
 
 def load_model(load_path, train=True):
     """
