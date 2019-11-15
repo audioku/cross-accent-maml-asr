@@ -150,8 +150,9 @@ if __name__ == '__main__':
     for label in labels:
         vocab.add_token(label)
         vocab.add_label(label)
-
+        
     if args.feat == "spectrogram":
+
         train_data = SpectrogramDataset(vocab, args, audio_conf, manifest_filepath_list=args.train_manifest_list, normalize=True, augment=args.augment, input_type=args.input_type, is_train=True)
     elif args.feat == "logfbank":
         train_data = LogFBankDataset(vocab, args, audio_conf, manifest_filepath_list=args.train_manifest_list, normalize=True, augment=args.augment, input_type=args.input_type, is_train=True)

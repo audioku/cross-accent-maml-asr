@@ -234,7 +234,8 @@ class SpectrogramDataset(Dataset, SpectrogramParser):
             audio_conf, normalize, augment)
 
     def uniform_shuffle(self, arr):
-        for i in range(len(arr)):
+        idxs = []
+        for i in range(32):
             index = random.randint(0, i)
             arr[i], arr[index] = arr[index], arr[i]
         return arr
@@ -246,30 +247,26 @@ class SpectrogramDataset(Dataset, SpectrogramParser):
         def func_trg(p):
             return len(p)
 
-        indices = [k for k in range(len(self.ids_list[manifest_id]))]
-        shuffled_indices = self.uniform_shuffle(indices)
+        ids = self.ids_list[manifest_id]
+        shuffled_indices = np.random.choice(np.arange(0, len(ids)), k_train + k_val, replace=True)
         tr_ids = shuffled_indices[:k_train]
         val_ids = shuffled_indices[k_train:k_train+k_val]
-        print("train:",tr_ids)
-        print("val:",val_ids)
         
         tr_spect, tr_transcript = [], []
         val_spect, val_transcript = [], []
 
         for i in range(len(tr_ids)):
-            ids = self.ids_list[manifest_id]
-            sample = ids[tr_ids[i] % len(tr_ids)]
+            sample = ids[tr_ids[i]]
             audio_path, transcript_path = sample[0], sample[1]
             spect = self.parse_audio(audio_path)[:,:self.args.src_max_len]
             transcript = self.parse_transcript(transcript_path)
 
             tr_spect.append(spect)
             tr_transcript.append(transcript)
-            print(">>>", transcript)
+#             print(">>>", transcript)
         
         for i in range(len(val_ids)):
-            ids = self.ids_list[manifest_id]
-            sample = ids[val_ids[i] % len(val_ids)]
+            sample = ids[val_ids[i]]
             audio_path, transcript_path = sample[0], sample[1]
             spect = self.parse_audio(audio_path)[:,:self.args.src_max_len]
             transcript = self.parse_transcript(transcript_path)

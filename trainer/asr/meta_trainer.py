@@ -6,7 +6,8 @@ import sys
 
 from copy import deepcopy
 from tqdm import tqdm
-from utils import constant
+# from utils import constant
+from collections import deque
 from utils.functions import save_meta_model, post_process
 from utils.optimizer import NoamOpt
 from utils.metrics import calculate_metrics, calculate_cer, calculate_wer
@@ -59,10 +60,13 @@ class MetaTrainer():
             total_wer += wer
             total_char += len(strs_golds[j].replace(' ', ''))
             total_word += len(strs_golds[j].split(" "))
-
+        
         if verbose:
+            print('Total CER', total_cer)
+            print('Total char', total_char)
+
             print("PRED:", strs_hyps)
-            print("GOLD:", strs_golds)
+            print("GOLD:", strs_golds, flush=True)
 
         return loss, total_cer, total_char
 
@@ -70,7 +74,7 @@ class MetaTrainer():
         for param_group in optimizer.param_groups:
             return param_group['lr']
 
-    def train(self, model, vocab, train_data_list, valid_loader_list, loss_type, start_it, num_it, args, evaluate_every=1000, last_metrics=None, early_stop=10):
+    def train(self, model, vocab, train_data_list, valid_loader_list, loss_type, start_it, num_it, args, evaluate_every=1000, window_size=100, last_summary_every=10, last_metrics=None, early_stop=10):
         """
         Training
         args:
@@ -100,6 +104,10 @@ class MetaTrainer():
         inner_opt = torch.optim.SGD(model.parameters(), lr=args.lr)
         outer_opt = torch.optim.Adam(model.parameters(), lr=args.meta_lr)
 
+        last_sum_loss = deque(maxlen=window_size)
+        last_sum_cer = deque(maxlen=window_size)
+        last_sum_char = deque(maxlen=window_size)
+        
         for it in range(start_it, num_it):
             weights_original = deepcopy(model.state_dict())
             
@@ -131,12 +139,18 @@ class MetaTrainer():
             
                 # Before first update
                 inner_opt.zero_grad()
-                tr_loss, tr_cer, tr_num_char = self.forward_one_batch(model, vocab, tr_inputs, tr_targets, tr_percentages, tr_input_sizes, tr_target_sizes, smoothing, loss_type)
-                val_loss, val_cer, val_num_char = self.forward_one_batch(model, vocab, val_inputs, val_targets, val_percentages, val_input_sizes, val_target_sizes, smoothing, loss_type, verbose=True)
+#                 print('META TRAIN')
+                model.train()
+                tr_loss, tr_cer, tr_num_char = self.forward_one_batch(model, vocab, tr_inputs, tr_targets, tr_percentages, tr_input_sizes, tr_target_sizes, smoothing, loss_type, verbose=False)
+#                 print('META VALID')
 
-                # Update fast nets
-                total_cer += val_cer
-                total_char += val_num_char
+                model.eval()
+                with torch.no_grad():
+                    val_loss, val_cer, val_num_char = self.forward_one_batch(model, vocab, val_inputs, val_targets, val_percentages, val_input_sizes, val_target_sizes, smoothing, loss_type, verbose=False)
+
+                    # Update train evaluation metric                    
+                    total_cer += val_cer
+                    total_char += val_num_char
 
                 tr_loss.backward()
                 inner_opt.step()
@@ -145,16 +159,19 @@ class MetaTrainer():
                     torch.nn.utils.clip_grad_norm_(model.parameters(), args.max_norm)
 
                 # After first update
+                model.eval()
                 val_loss, val_cer, val_num_char = self.forward_one_batch(model, vocab, val_inputs, val_targets, val_percentages, val_input_sizes, val_target_sizes, smoothing, loss_type)
+                
                 batch_loss += val_loss
-
                 total_loss += val_loss.item()
+                
                 end_time = time.time()
                 diff_time = end_time - start_time
                 total_time += diff_time
 
                 # reset
-                model.load_state_dict({ name: weights_original[name] for name in weights_original })
+                # model.load_state_dict({ name: weights_original[name] for name in weights_original })
+                model.load_state_dict(weights_original)
                 # print("inner:", model.encoder.input_linear.weight)
 
             # outer loop optimization
@@ -167,13 +184,22 @@ class MetaTrainer():
 
             outer_opt.step()
             
+            last_sum_cer.append(total_cer)
+            last_sum_char.append(total_char)
+            last_sum_loss.append(total_loss)
+            
             print("(Iteration {}) TRAIN LOSS:{:.4f} CER:{:.2f}% LR:{:.7f} TOTAL TIME:{:.7f}".format(
-                (it+1), total_loss/len(train_data_list), total_cer*100/total_char, self.get_lr(outer_opt), total_time))
+                (it+1), total_loss/len(train_data_list), total_cer*100/total_char, self.get_lr(outer_opt), total_time))            
             logging.info("(Iteration {}) TRAIN LOSS:{:.4f} CER:{:.2f}% LR:{:.7f} TOTAL TIME:{:.7f}".format(
                 (it+1), total_loss/len(train_data_list), total_cer*100/total_char, self.get_lr(outer_opt), total_time))
+            
+            if (it + 1) % last_summary_every == 0:
+                print("(Summary Iteration {} | MA {}) TRAIN LOSS:{:.4f} CER:{:.2f}%".format(
+                    (it+1), window_size, sum(last_sum_loss)/len(last_sum_loss), sum(last_sum_cer)*100/sum(last_sum_char)))
+            
 
             # VALID
-            if it % evaluate_every == 0 and it > 0:
+            if (it + 1) % evaluate_every == 0:
                 print("")
                 logging.info("VALID")
                 model.eval()
