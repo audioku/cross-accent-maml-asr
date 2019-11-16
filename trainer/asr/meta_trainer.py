@@ -308,7 +308,7 @@ class MetaTrainer():
                 print("AVG VALID LOSS:{:.4f} AVG CER:{:.2f}%".format(sum(final_valid_losses) / len(final_valid_losses), sum(final_valid_cers) / len(final_valid_cers)))
                 logging.info("AVG VALID LOSS:{:.4f} AVG CER:{:.2f}%".format(sum(final_valid_losses) / len(final_valid_losses), sum(final_valid_cers) / len(final_valid_cers)))
 
-                if it % args.save_every == 0:
+                if (it+1) % args.save_every == 0:
                     save_meta_model(model, vocab, (it+1), inner_opt, outer_opt, metrics, args, best_model=False)
 
                 # save the best model
