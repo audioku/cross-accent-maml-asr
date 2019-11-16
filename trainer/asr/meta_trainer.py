@@ -192,28 +192,28 @@ class MetaTrainer():
             last_sum_char.append(total_char)
             last_sum_loss.append(total_loss)
             
-            print("(Iteration {}) TRAIN LOSS:{:.4f} CER:{:.2f}% LR:{:.7f} TOTAL TIME:{:.7f}".format(
-                (it+1), total_loss/len(train_data_list), total_cer*100/total_char, self.get_lr(outer_opt), total_time))            
-            logging.info("(Iteration {}) TRAIN LOSS:{:.4f} CER:{:.2f}% LR:{:.7f} TOTAL TIME:{:.7f}".format(
-                (it+1), total_loss/len(train_data_list), total_cer*100/total_char, self.get_lr(outer_opt), total_time))
+            # print("(Iteration {}) TRAIN LOSS:{:.4f} CER:{:.2f}% LR:{:.7f} TOTAL TIME:{:.7f}".format(
+            #     (it+1), total_loss/len(train_data_list), total_cer*100/total_char, self.get_lr(outer_opt), total_time))            
+            # logging.info("(Iteration {}) TRAIN LOSS:{:.4f} CER:{:.2f}% LR:{:.7f} TOTAL TIME:{:.7f}".format(
+            #     (it+1), total_loss/len(train_data_list), total_cer*100/total_char, self.get_lr(outer_opt), total_time))
 
 
             # Delete copy weight
             del weights_original
             
             # outer loop optimization
-            outer_opt.zero_grad()
-            batch_loss /= len(train_data_list)
-            batch_loss.backward()
+            # outer_opt.zero_grad()
+            # batch_loss /= len(train_data_list)
+            # batch_loss.backward()
             
-            if args.clip:
-                torch.nn.utils.clip_grad_norm_(model.parameters(), args.max_norm)
+            # if args.clip:
+            #     torch.nn.utils.clip_grad_norm_(model.parameters(), args.max_norm)
 
-            outer_opt.step()
+            # outer_opt.step()
             
-            last_sum_cer.append(total_cer)
-            last_sum_char.append(total_char)
-            last_sum_loss.append(total_loss)
+            # last_sum_cer.append(total_cer)
+            # last_sum_char.append(total_char)
+            # last_sum_loss.append(total_loss)
             
             print("(Iteration {}) TRAIN LOSS:{:.4f} CER:{:.2f}% LR:{:.7f} TOTAL TIME:{:.7f}".format(
                 (it+1), total_loss/len(train_data_list), total_cer*100/total_char, self.get_lr(outer_opt), total_time))         
