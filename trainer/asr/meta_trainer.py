@@ -74,7 +74,7 @@ class MetaTrainer():
         for param_group in optimizer.param_groups:
             return param_group['lr']
 
-    def train(self, model, vocab, train_data_list, valid_loader_list, loss_type, start_it, num_it, args, evaluate_every=1000, window_size=100, last_summary_every=10, last_metrics=None, early_stop=10, cpu_state_dict=False):
+    def train(self, model, vocab, train_data_list, valid_loader_list, loss_type, start_it, num_it, args, evaluate_every=1000, window_size=100, last_summary_every=10, last_metrics=None, early_stop=10, cpu_state_dict=False, is_copy_grad=True):
         """
         Training
         args:
@@ -108,12 +108,18 @@ class MetaTrainer():
         last_sum_cer = deque(maxlen=window_size)
         last_sum_char = deque(maxlen=window_size)
         
+        # Sequentially fetch first batch data from all manifest
+        # TODO
+            
         k_train, k_valid = args.k_train, args.k_valid
         for it in range(start_it, num_it):
+            # Parallelly fetch next batch data from all manifest
+            # TODO
+            
             # Start execution time
             start_time = time.time()
             
-            # Prepare model state dict
+            # Prepare model state dict (Based on experiment it doesn't yield any difference)
             if cpu_state_dict:
                 model.cpu()
                 weights_original = deepcopy(model.state_dict())
@@ -128,13 +134,14 @@ class MetaTrainer():
 
             # Reinit outer opt
             outer_opt.zero_grad()
-#             model.zero_copy_grad() # initialize copy_grad with 0
-#             print('ZERO', model.copy_grad[0].sum())
+            if is_copy_grad:
+                model.zero_copy_grad() # initialize copy_grad with 0
             
             # Loop over all tasks
             for manifest_id in range(len(train_data_list)):                
-                torch.cuda.empty_cache()
+                # torch.cuda.empty_cache()
                 
+                # Retrieve manifest data
                 tr_data, val_data = train_data_list[manifest_id].sample(k_train, k_valid, manifest_id)
                 tr_inputs, tr_input_sizes, tr_percentages, tr_targets, tr_target_sizes = tr_data
                 val_inputs, val_input_sizes, val_percentages, val_targets, val_target_sizes = val_data
@@ -174,12 +181,14 @@ class MetaTrainer():
                 total_loss += val_loss.item()
 
                 # outer loop optimization
-                batch_loss += val_loss / len(train_data_list)
-#                 batch_loss.backward()
-                
-#                 model.add_copy_grad() # add model grad to copy grad
-#                 print('ADD', model.copy_grad[0].sum())
+                if is_copy_grad:
+                    batch_loss = val_loss / len(train_data_list)
+                    batch_loss.backward()
 
+                    model.add_copy_grad() # add model grad to copy grad
+                else:
+                    batch_loss += val_loss / len(train_data_list)
+                
                 # Reset Weight
                 model.load_state_dict(weights_original)
             
@@ -187,14 +196,11 @@ class MetaTrainer():
             del weights_original
             
             # Outer loop optimization
-#             model.from_copy_grad() # copy grad from copy_grad to model
-#             print('COPY', model.copy_grad[0].sum())
-#             for param in model.parameters():
-#                 print('COPIED', param.grad.sum())
-#                 break
-            
-            outer_opt.zero_grad()
-            batch_loss.backward()
+            if is_copy_grad:
+                model.from_copy_grad() # copy grad from copy_grad to model
+            else:
+                batch_loss.backward()
+
             if args.clip:
                 torch.nn.utils.clip_grad_norm_(model.parameters(), args.max_norm)
             outer_opt.step()

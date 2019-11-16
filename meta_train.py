@@ -8,6 +8,7 @@ import os
 import torch
 import torch.nn as nn
 import numpy as np
+import random
 
 from torchsummary import summary
 from torch.autograd import Variable
@@ -101,6 +102,10 @@ parser.add_argument('--factorize', action='store_true', help='factorize')
 
 torch.manual_seed(123456)
 torch.cuda.manual_seed_all(123456)
+np.random.seed(123456)
+random.seed(123456)
+
+# torch.backends.cudnn.deterministic=True
 
 args = parser.parse_args()
 USE_CUDA = args.cuda
