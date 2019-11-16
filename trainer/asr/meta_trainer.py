@@ -111,6 +111,7 @@ class MetaTrainer():
         for it in range(start_it, num_it):
             try:
                 weights_original = deepcopy(model.state_dict())
+                weights_inner = deepcopy(model.state_dict())
                 
                 # accumulate loss
                 batch_loss = 0
@@ -121,89 +122,79 @@ class MetaTrainer():
                 for manifest_id in range(len(train_data_list)):
                     # torch.cuda.empty_cache()
 
-                    repeat, first = False, True
                     k_train, k_valid = args.k_train, args.k_valid
-                    while repeat or first:
-                        first = False
-                        if k_train == 0 or k_valid == 0:
-                            print("skip")
-                            logging.info("skip")
-                            break
-                        try:
-                            torch.cuda.empty_cache()
-                            tr_data, val_data = train_data_list[manifest_id].sample(k_train, k_valid, manifest_id)
-                            tr_inputs, tr_input_sizes, tr_percentages, tr_targets, tr_target_sizes = tr_data
-                            val_inputs, val_input_sizes, val_percentages, val_targets, val_target_sizes = val_data
-                            
-                            if args.cuda:
-                                tr_inputs = tr_inputs.cuda()
-                                tr_input_sizes = tr_input_sizes.cuda()
-                                tr_targets = tr_targets.cuda()
-                                tr_target_sizes = tr_target_sizes.cuda()
+                    torch.cuda.empty_cache()
+                    tr_data, val_data = train_data_list[manifest_id].sample(k_train, k_valid, manifest_id)
+                    tr_inputs, tr_input_sizes, tr_percentages, tr_targets, tr_target_sizes = tr_data
+                    val_inputs, val_input_sizes, val_percentages, val_targets, val_target_sizes = val_data
+                    
+                    if args.cuda:
+                        tr_inputs = tr_inputs.cuda()
+                        tr_input_sizes = tr_input_sizes.cuda()
+                        tr_targets = tr_targets.cuda()
+                        tr_target_sizes = tr_target_sizes.cuda()
 
-                                val_inputs = val_inputs.cuda()
-                                val_input_sizes = val_input_sizes.cuda()
-                                val_targets = val_targets.cuda()
-                                val_target_sizes = val_target_sizes.cuda()
-                            
-                            if repeat:
-                                print("k_train:{} k_valid:{}".format(k_train, k_valid))
-                                logging.info("k_train:{} k_valid:{}".format(k_train, k_valid))
-
-                            start_time = time.time()
-                        
-                            # Before first update
-                            inner_opt.zero_grad()
-            #                 print('META TRAIN')
-                            model.train()
-                            tr_loss, tr_cer, tr_num_char = self.forward_one_batch(model, vocab, tr_inputs, tr_targets, tr_percentages, tr_input_sizes, tr_target_sizes, smoothing, loss_type, verbose=False)
-            #                 print('META VALID')
-
-                            model.eval()
-                            with torch.no_grad():
-                                val_loss, val_cer, val_num_char = self.forward_one_batch(model, vocab, val_inputs, val_targets, val_percentages, val_input_sizes, val_target_sizes, smoothing, loss_type, verbose=False)
-
-                                # Update train evaluation metric                    
-                                total_cer += val_cer
-                                total_char += val_num_char
-
-                            tr_loss.backward()
-                            inner_opt.step()
-
-                            if args.clip:
-                                torch.nn.utils.clip_grad_norm_(model.parameters(), args.max_norm)
-
-                            # After first update
-                            model.eval()
-                            val_loss, val_cer, val_num_char = self.forward_one_batch(model, vocab, val_inputs, val_targets, val_percentages, val_input_sizes, val_target_sizes, smoothing, loss_type)
-                            
-                            batch_loss += val_loss
-                            total_loss += val_loss.item()
-                            
-                            end_time = time.time()
-                            diff_time = end_time - start_time
-                            total_time += diff_time
-
-                            # reset
-                            # model.load_state_dict({ name: weights_original[name] for name in weights_original })
-                            model.load_state_dict(weights_original)
-                            # print("inner:", model.encoder.input_linear.weight)
-                            break
-                        except:
-                            repeat=True
-                            k_train = k_train // 2
-                            k_valid = k_valid // 2
-                            continue
-
-                # outer loop optimization
-                outer_opt.zero_grad()
-                batch_loss /= len(train_data_list)
-                batch_loss.backward()
+                        val_inputs = val_inputs.cuda()
+                        val_input_sizes = val_input_sizes.cuda()
+                        val_targets = val_targets.cuda()
+                        val_target_sizes = val_target_sizes.cuda()
+                    
+                    start_time = time.time()
                 
-                if args.clip:
-                    torch.nn.utils.clip_grad_norm_(model.parameters(), args.max_norm)
+                    # Before first update
+                    inner_opt.zero_grad()
+    #                 print('META TRAIN')
+                    model.train()
+                    tr_loss, tr_cer, tr_num_char = self.forward_one_batch(model, vocab, tr_inputs, tr_targets, tr_percentages, tr_input_sizes, tr_target_sizes, smoothing, loss_type, verbose=False)
+    #                 print('META VALID')
 
-                outer_opt.step()
+                    model.eval()
+                    with torch.no_grad():
+                        val_loss, val_cer, val_num_char = self.forward_one_batch(model, vocab, val_inputs, val_targets, val_percentages, val_input_sizes, val_target_sizes, smoothing, loss_type, verbose=False)
+
+                        # Update train evaluation metric                    
+                        total_cer += val_cer
+                        total_char += val_num_char
+
+                    tr_loss.backward()
+                    inner_opt.step()
+
+                    if args.clip:
+                        torch.nn.utils.clip_grad_norm_(model.parameters(), args.max_norm)
+
+                    # After first update
+                    model.eval()
+                    val_loss, val_cer, val_num_char = self.forward_one_batch(model, vocab, val_inputs, val_targets, val_percentages, val_input_sizes, val_target_sizes, smoothing, loss_type)
+                    
+                    # batch_loss += val_loss
+                    total_loss += val_loss.item()
+                    
+                    end_time = time.time()
+                    diff_time = end_time - start_time
+                    total_time += diff_time
+
+                    # outer loop optimization
+                    outer_opt.zero_grad()
+                    
+                    model.load_state_dict(weights_inner)
+                    batch_loss = val_loss / len(train_data_list)
+                    batch_loss.backward()
+                    if args.clip:
+                        torch.nn.utils.clip_grad_norm_(model.parameters(), args.max_norm)
+                    outer_opt.step()
+                    weights_inner = deepcopy(model.state_dict())
+
+                    # reset
+                    model.load_state_dict(weights_original)
+                    # print("inner:", model.encoder.input_linear.weight)
+                    
+                # outer loop optimization
+                # outer_opt.zero_grad()
+                # batch_loss /= len(train_data_list)
+                # batch_loss.backward()
+                # if args.clip:
+                #     torch.nn.utils.clip_grad_norm_(model.parameters(), args.max_norm)
+                # outer_opt.step()
                 
                 last_sum_cer.append(total_cer)
                 last_sum_char.append(total_char)
