@@ -74,7 +74,7 @@ class MetaTrainer():
         for param_group in optimizer.param_groups:
             return param_group['lr']
 
-    def train(self, model, vocab, train_data_list, valid_loader_list, loss_type, start_it, num_it, args, evaluate_every=1000, window_size=100, last_summary_every=10, last_metrics=None, early_stop=10):
+    def train(self, model, vocab, train_data_list, valid_loader_list, loss_type, start_it, num_it, args, evaluate_every=1000, window_size=100, last_summary_every=10, last_metrics=None, early_stop=10, cpu_state_dict=False):
         """
         Training
         args:
@@ -110,8 +110,16 @@ class MetaTrainer():
         
         k_train, k_valid = args.k_train, args.k_valid
         for it in range(start_it, num_it):
-            weights_original = deepcopy(model.state_dict())
-            weights_inner = deepcopy(model.state_dict())
+            # Start execution time
+            start_time = time.time()
+            
+            # Prepare model state dict
+            if cpu_state_dict:
+                model.cpu()
+                weights_original = deepcopy(model.state_dict())
+                model.cuda()
+            else:
+                weights_original = deepcopy(model.state_dict())
             
             # Buffer for accumulating loss
             batch_loss = 0
@@ -120,6 +128,8 @@ class MetaTrainer():
 
             # Reinit outer opt
             outer_opt.zero_grad()
+#             model.zero_copy_grad() # initialize copy_grad with 0
+#             print('ZERO', model.copy_grad[0].sum())
             
             # Loop over all tasks
             for manifest_id in range(len(train_data_list)):                
@@ -140,7 +150,6 @@ class MetaTrainer():
                     val_targets = val_targets.cuda()
                     val_target_sizes = val_target_sizes.cuda()
                 
-                start_time = time.time()
             
                 # Meta Train
                 model.train()
@@ -163,26 +172,29 @@ class MetaTrainer():
                 
                 # batch_loss += val_loss
                 total_loss += val_loss.item()
-                
-                end_time = time.time()
-                diff_time = end_time - start_time
-                total_time += diff_time
 
                 # outer loop optimization
-                # TODO: Add second state for push to 2nd grad instead of first_grad
-                # model.toggle_copy_grad(True)
-                model.load_state_dict(weights_inner) # TODO: Make sure it is needed
-                batch_loss = val_loss / len(train_data_list)
-                batch_loss.backward()
-                # model.toggle_copy_grad(False)
-                if args.clip:
-                    torch.nn.utils.clip_grad_norm_(model.parameters(), args.max_norm)
-                weights_inner = deepcopy(model.state_dict())
+                batch_loss += val_loss / len(train_data_list)
+#                 batch_loss.backward()
+                
+#                 model.add_copy_grad() # add model grad to copy grad
+#                 print('ADD', model.copy_grad[0].sum())
 
                 # Reset Weight
                 model.load_state_dict(weights_original)
             
+            # Delete copy weight
+            del weights_original
+            
             # Outer loop optimization
+#             model.from_copy_grad() # copy grad from copy_grad to model
+#             print('COPY', model.copy_grad[0].sum())
+#             for param in model.parameters():
+#                 print('COPIED', param.grad.sum())
+#                 break
+            
+            outer_opt.zero_grad()
+            batch_loss.backward()
             if args.clip:
                 torch.nn.utils.clip_grad_norm_(model.parameters(), args.max_norm)
             outer_opt.step()
@@ -192,28 +204,10 @@ class MetaTrainer():
             last_sum_char.append(total_char)
             last_sum_loss.append(total_loss)
             
-            # print("(Iteration {}) TRAIN LOSS:{:.4f} CER:{:.2f}% LR:{:.7f} TOTAL TIME:{:.7f}".format(
-            #     (it+1), total_loss/len(train_data_list), total_cer*100/total_char, self.get_lr(outer_opt), total_time))            
-            # logging.info("(Iteration {}) TRAIN LOSS:{:.4f} CER:{:.2f}% LR:{:.7f} TOTAL TIME:{:.7f}".format(
-            #     (it+1), total_loss/len(train_data_list), total_cer*100/total_char, self.get_lr(outer_opt), total_time))
-
-
-            # Delete copy weight
-            del weights_original
-            
-            # outer loop optimization
-            # outer_opt.zero_grad()
-            # batch_loss /= len(train_data_list)
-            # batch_loss.backward()
-            
-            # if args.clip:
-            #     torch.nn.utils.clip_grad_norm_(model.parameters(), args.max_norm)
-
-            # outer_opt.step()
-            
-            # last_sum_cer.append(total_cer)
-            # last_sum_char.append(total_char)
-            # last_sum_loss.append(total_loss)
+            # Record execution time
+            end_time = time.time()
+            diff_time = end_time - start_time
+            total_time += diff_time
             
             print("(Iteration {}) TRAIN LOSS:{:.4f} CER:{:.2f}% LR:{:.7f} TOTAL TIME:{:.7f}".format(
                 (it+1), total_loss/len(train_data_list), total_cer*100/total_char, self.get_lr(outer_opt), total_time))         
