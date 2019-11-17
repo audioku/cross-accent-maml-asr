@@ -151,7 +151,7 @@ if __name__ == '__main__':
         vocab.add_label(label)
         
     train_loader_list, valid_loader_list, test_loader_list = [], [], []
-    for i in range(len(args.valid_manifest_list)):
+    for i in range(len(args.train_manifest_list)):
         if args.feat == "spectrogram":
             train_data = SpectrogramDataset(vocab, args, audio_conf, manifest_filepath_list=[args.train_manifest_list[i]], normalize=True, augment=args.augment, input_type=args.input_type)
         elif args.feat == "logfbank":
