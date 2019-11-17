@@ -47,6 +47,13 @@ class Analyzer():
 
                     src_len = src_lengths.squeeze().tolist()
                     trg_len = trg_lengths.squeeze().tolist()
+                    
+                    # Handle single element
+                    if not isinstance(src_len, list):
+                        src_len = [src_len]
+                    if not isinstance(trg_len, list):
+                        trg_len = [trg_len]
+                        
 #                     print('SRC {}'.format(src_len), flush=True)
 #                     print('TRG {}'.format(trg_len), flush=True)
 
