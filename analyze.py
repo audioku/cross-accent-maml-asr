@@ -12,9 +12,9 @@ import random
 
 from torchsummary import summary
 from torch.autograd import Variable
-from trainer.asr.meta_trainer import MetaTrainer
+from trainer.asr.analyzer import Analyzer
 from utils.data import Vocab
-from utils.data_loader import SpectrogramDataset, LogFBankDataset, AudioDataLoader, BucketingSampler
+from utils.data_loader import SpectrogramDataset, LogFBankDataset, SamcahAudioDataLoader, AudioDataLoader, BucketingSampler
 from utils.functions import save_model, load_model, init_transformer_model, init_optimizer, compute_num_params, generate_labels
 
 parser = argparse.ArgumentParser(description='Transformer ASR meta training')
@@ -26,8 +26,7 @@ parser.add_argument('--valid-manifest-list', nargs='+', type=str)
 parser.add_argument('--test-manifest-list', nargs='+', type=str)
 
 parser.add_argument('--sample-rate', default=22050, type=int, help='Sample rate')
-parser.add_argument('--k-train', default=20, type=int, help='Batch size for training')
-parser.add_argument('--k-valid', default=20, type=int, help='Batch size for eval')
+parser.add_argument('--batch-size', default=20, type=int, help='Batch size')
 
 parser.add_argument('--num-workers', default=8, type=int, help='Number of workers used in data-loading')
 parser.add_argument('--labels-path', default='labels.json', help='Contains all characters for transcription')
@@ -109,8 +108,6 @@ torch.cuda.manual_seed_all(123456)
 np.random.seed(123456)
 random.seed(123456)
 
-# torch.backends.cudnn.deterministic=True
-
 args = parser.parse_args()
 USE_CUDA = args.cuda
 
@@ -152,48 +149,32 @@ if __name__ == '__main__':
     for label in labels:
         vocab.add_token(label)
         vocab.add_label(label)
-
-    train_data_list = []
+        
+    train_loader_list, valid_loader_list, test_loader_list = [], [], []
     for i in range(len(args.train_manifest_list)):
         if args.feat == "spectrogram":
-            train_data = SpectrogramDataset(vocab, args, audio_conf, manifest_filepath_list=args.train_manifest_list, normalize=True, augment=args.augment, input_type=args.input_type, is_train=True)
+            train_data = SpectrogramDataset(vocab, args, audio_conf, manifest_filepath_list=[args.train_manifest_list[i]], normalize=True, augment=args.augment, input_type=args.input_type)
         elif args.feat == "logfbank":
-            train_data = LogFBankDataset(vocab, args, audio_conf, manifest_filepath_list=args.train_manifest_list, normalize=True, augment=args.augment, input_type=args.input_type, is_train=True)
-        train_data_list.append(train_data)
-
-    valid_loader_list, test_loader_list = [], []
+            train_data = LogFBankDataset(vocab, args, audio_conf, manifest_filepath_list=[args.train_manifest_list[i]], normalize=True, augment=False, input_type=args.input_type)
+        train_loader = SamcahAudioDataLoader(pad_token_id=0, dataset=train_data, num_workers=args.num_workers, batch_size=args.batch_size)
+        train_loader_list.append(train_loader)
+    
     for i in range(len(args.valid_manifest_list)):
         if args.feat == "spectrogram":
             valid_data = SpectrogramDataset(vocab, args, audio_conf, manifest_filepath_list=[args.valid_manifest_list[i]], normalize=True, augment=args.augment, input_type=args.input_type)
         elif args.feat == "logfbank":
             valid_data = LogFBankDataset(vocab, args, audio_conf, manifest_filepath_list=[args.valid_manifest_list[i]], normalize=True, augment=False, input_type=args.input_type)
-        valid_sampler = BucketingSampler(valid_data, batch_size=args.k_train)
-        valid_loader = AudioDataLoader(pad_token_id=vocab.PAD_ID, dataset=valid_data, num_workers=args.num_workers)
+        valid_loader = SamcahAudioDataLoader(pad_token_id=0, dataset=valid_data, num_workers=args.num_workers, batch_size=args.batch_size)
         valid_loader_list.append(valid_loader)
-
-    start_epoch = 0
-    metrics = None
-    loaded_args = None
-    if args.continue_from != "":
-        logging.info("Continue from checkpoint:" + args.continue_from)
-        model, vocab, opt, epoch, metrics, loaded_args = load_model(args.continue_from)
-        start_epoch = (epoch)  # index starts from zero
-        verbose = args.verbose
-    else:
-        if args.model == "TRFS":
-            model = init_transformer_model(args, vocab, is_factorized=args.is_factorized, r=args.r)
-        else:
-            logging.info("The model is not supported, check args --h")
     
-    loss_type = args.loss
+    for i in range(len(args.test_manifest_list)):
+        if args.feat == "spectrogram":
+            test_data = SpectrogramDataset(vocab, args, audio_conf, manifest_filepath_list=[args.test_manifest_list[i]], normalize=True, augment=args.augment, input_type=args.input_type)
+        elif args.feat == "logfbank":
+            test_data = LogFBankDataset(vocab, args, audio_conf, manifest_filepath_list=[args.test_manifest_list[i]], normalize=True, augment=False, input_type=args.input_type)
+        test_loader = SamcahAudioDataLoader(pad_token_id=0, dataset=test_data, num_workers=args.num_workers, batch_size=args.batch_size)
+        test_loader_list.append(test_loader)
 
-    if USE_CUDA:
-        model = model.cuda()
-
-    logging.info(model)
-    num_epochs = args.epochs
-
-    print("Parameters: {}(trainable), {}(non-trainable)".format(compute_num_params(model)[0], compute_num_params(model)[1]))
-
-    trainer = MetaTrainer()
-    trainer.train(model, vocab, train_data_list, valid_loader_list, loss_type, start_epoch, num_epochs, args, evaluate_every=args.evaluate_every, last_metrics=metrics, early_stop=args.early_stop, cpu_state_dict=args.cpu_state_dict, is_copy_grad=args.copy_grad)
+    analyzer = Analyzer()
+    analyzer.analyze(train_loader_list, valid_loader_list, test_loader_list, 
+        args.train_manifest_list, args.valid_manifest_list, args.test_manifest_list)
