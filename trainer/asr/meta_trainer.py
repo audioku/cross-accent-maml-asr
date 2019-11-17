@@ -153,7 +153,7 @@ class MetaTrainer():
             
                 # Meta Train
                 model.train()
-                tr_loss, tr_cer, tr_num_char = self.forward_one_batch(model, vocab, tr_inputs, tr_targets, tr_percentages, tr_input_sizes, tr_target_sizes, smoothing, loss_type, verbose=False)
+                tr_loss, tr_cer, tr_num_char = self.forward_one_batch(model, vocab, tr_inputs, tr_targets, tr_percentages, tr_input_sizes, tr_target_sizes, smoothing, loss_type, verbose=True)
 
                 # Update train evaluation metric                    
                 total_cer += tr_cer
@@ -168,7 +168,7 @@ class MetaTrainer():
 
                 # Meta Validation 
                 model.eval()
-                val_loss, val_cer, val_num_char = self.forward_one_batch(model, vocab, val_inputs, val_targets, val_percentages, val_input_sizes, val_target_sizes, smoothing, loss_type)
+                val_loss, val_cer, val_num_char = self.forward_one_batch(model, vocab, val_inputs, val_targets, val_percentages, val_input_sizes, val_target_sizes, smoothing, loss_type, verbose=False)
                 
                 # batch_loss += val_loss
                 total_loss += val_loss.item()
