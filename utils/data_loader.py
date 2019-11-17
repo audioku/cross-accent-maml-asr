@@ -538,7 +538,7 @@ class AudioDataLoader(DataLoader):
     def __init__(self, pad_token_id, *args, **kwargs):
         super(AudioDataLoader, self).__init__(*args, **kwargs)
         self.pad_token_id = pad_token_id
-    
+        
         def _collate_fn(batch):
             def func(p):
                 return p[0].size(1)
@@ -559,7 +559,7 @@ class AudioDataLoader(DataLoader):
 
             targets = torch.full((len(batch), max_trg_len), self.pad_token_id).long()
             target_sizes = torch.IntTensor(len(batch))
-
+            
             for x in range(len(batch)):
                 sample = batch[x]
                 input_data = sample[0]
@@ -576,7 +576,48 @@ class AudioDataLoader(DataLoader):
             return inputs, targets, input_percentages, input_sizes, target_sizes
 
         self.collate_fn = _collate_fn
+        
+class SamcahAudioDataLoader(DataLoader):
+    def __init__(self, pad_token_id, *args, **kwargs):
+        super(SamcahAudioDataLoader, self).__init__(*args, **kwargs)
+        self.pad_token_id = pad_token_id
+    
+        def _collate_fn(batch):
+            # Batch is a tuple of (audio_features (torch.Tensor)[dim x seq_len], target_text (list))
+            def src_len(p):
+                return p[0].size(1)
 
+            def trg_len(p):
+                return len(p[1])
+            
+            # descending sorted
+            batch = sorted(batch, key=lambda sample: sample[0].size(1), reverse=True)
+            
+            seq_len = list(map(src_len, batch))
+            trg_len = list(map(trg_len, batch))
+            
+            max_seq_len = max(seq_len)
+            freq_size = batch[0][0].size(0)
+            max_trg_len = max(trg_len)
+
+            inputs = torch.zeros(len(batch), 1, freq_size, max_seq_len)
+            input_sizes = torch.IntTensor(seq_len)
+            input_percentages = torch.FloatTensor(len(batch))
+            targets = torch.full((len(batch), max_trg_len), self.pad_token_id).long()
+            target_sizes = torch.IntTensor(trg_len)
+
+            for x in range(len(batch)):
+                sample = batch[x]
+                input_data = sample[0]
+                target = sample[1]
+                inputs[x,0,:,:seq_len[x]] = input_data
+                input_percentages[x] = seq_len[x] / max_seq_len
+                targets[x][:trg_len[x]] = torch.IntTensor(target)
+
+            return inputs, targets, input_percentages, input_sizes, target_sizes
+        
+        self.collate_fn = _collate_fn
+    
 class BucketingSampler(Sampler):
     def __init__(self, data_source, batch_size=1):
         """
