@@ -58,6 +58,6 @@ class Analyzer():
 
                 print('{} MAX SRC'.format(manifest, df['src'].max()))
                 print('{} MAX TRG'.format(manifest, df['trg'].max()))
-                print('{} DESC'.format(manifest))
+                print('{} STATS'.format(manifest))
                 print(df.describe([0.01,0.05,0.25,0.4,0.5,0.6,0.75,0.95,0.99]))
         return 0
