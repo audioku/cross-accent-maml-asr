@@ -52,9 +52,8 @@ class Analyzer():
 
                     src_lens += src_len
                     trg_lens += trg_len
-                    if idx == 10:
-                        break
-                df = pd.DataFrame({'src':src_lens, 'trg':trg_lens})
+
+        df = pd.DataFrame({'src':src_lens, 'trg':trg_lens})
                 df.to_csv(manifest, index=False)
 
                 print('{} MAX SRC'.format(manifest, df['src'].max()))
