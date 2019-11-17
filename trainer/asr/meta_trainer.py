@@ -74,7 +74,7 @@ class MetaTrainer():
         for param_group in optimizer.param_groups:
             return param_group['lr']
 
-    def train(self, model, vocab, train_data_list, valid_loader_list, loss_type, start_it, num_it, args, evaluate_every=1000, window_size=100, last_summary_every=10, last_metrics=None, early_stop=10, cpu_state_dict=False, is_copy_grad=True):
+    def train(self, model, vocab, train_data_list, valid_loader_list, loss_type, start_it, num_it, args, evaluate_every=1000, window_size=100, last_summary_every=10, last_metrics=None, early_stop=10, cpu_state_dict=False, is_copy_grad=False):
         """
         Training
         args:
@@ -222,7 +222,7 @@ class MetaTrainer():
             
             if (it + 1) % last_summary_every == 0:
                 print("(Summary Iteration {} | MA {}) TRAIN LOSS:{:.4f} CER:{:.2f}%".format(
-                    (it+1), window_size, sum(last_sum_loss)/len(last_sum_loss), sum(last_sum_cer)*100/sum(last_sum_char)))
+                    (it+1), window_size, sum(last_sum_loss)/len(last_sum_loss), sum(last_sum_cer)*100/sum(last_sum_char)), flush=True)
                 logging.info("(Summary Iteration {} | MA {}) TRAIN LOSS:{:.4f} CER:{:.2f}%".format(
                     (it+1), window_size, sum(last_sum_loss)/len(last_sum_loss), sum(last_sum_cer)*100/sum(last_sum_char)))
             
@@ -255,37 +255,6 @@ class MetaTrainer():
                         total_valid_loss += loss.item()
                         valid_pbar.set_description("VALID SET {} LOSS:{:.4f} CER:{:.2f}%".format(ind,
                             total_valid_loss/(i+1), total_valid_cer*100/total_valid_char))
-                        # except:
-                        #     try:
-                        #         # torch.cuda.empty_cache()
-                        #         src = src.cpu()
-                        #         trg = trg.cpu()
-                        #         src_splits, src_lengths_splits, trg_lengths_splits, trg_splits, trg_transcript_splits, src_percentages_splits = iter(src.split(2, dim=0)), iter(src_lengths.split(2, dim=0)), iter(trg_lengths.split(2, dim=0)), iter(trg.split(2, dim=0)), iter(trg_transcript.split(2, dim=0)), iter(src_percentages.split(2, dim=0))
-                        #         j = 0
-                        #         for src, trg, src_lengths, trg_lengths, src_percentages in zip(src_splits, trg_splits, src_lengths_splits, trg_lengths_splits, src_percentages_splits):
-                        #             opt.zero_grad()
-                        #             # torch.cuda.empty_cache()
-                        #             if args.cuda:
-                        #                 src = src.cuda()
-                        #                 trg = trg.cuda()
-
-                        #             loss, cer, num_char = self.train_one_batch(model, vocab, src, trg, src_percentages, src_lengths, trg_lengths, smoothing, loss_type)
-                        #             total_valid_cer += cer
-                        #             total_valid_char += num_char
-
-                        #             if args.clip:
-                        #                 torch.nn.utils.clip_grad_norm_(model.parameters(), args.max_norm)
-                                    
-                        #             total_valid_loss += loss.item()
-                        #             j += 1
-                        #         valid_pbar.set_description("VALID SET {} LOSS:{:.4f} CER:{:.2f}%".format(ind, total_valid_loss/(i+1), total_valid_cer*100/total_valid_char))
-
-                        #         logging.info("probably OOM, autosplit batch. succeeded")
-                        #         print("probably OOM, autosplit batch. succeeded")
-                        #     except:
-                        #         logging.info("probably OOM, autosplit batch. skip batch")
-                        #         print("probably OOM, autosplit batch. skip batch")
-                        #         continue
 
                     final_valid_loss = total_valid_loss/(len(valid_loader))
                     final_valid_cer = total_valid_cer*100/total_valid_char

@@ -29,7 +29,7 @@ parser.add_argument('--sample-rate', default=22050, type=int, help='Sample rate'
 parser.add_argument('--k-train', default=20, type=int, help='Batch size for training')
 parser.add_argument('--k-valid', default=20, type=int, help='Batch size for eval')
 
-parser.add_argument('--num-workers', default=4, type=int, help='Number of workers used in data-loading')
+parser.add_argument('--num-workers', default=8, type=int, help='Number of workers used in data-loading')
 parser.add_argument('--labels-path', default='labels.json', help='Contains all characters for transcription')
 parser.add_argument('--label-smoothing', default=0.0, type=float, help='Label smoothing')
 parser.add_argument('--window-size', default=.02, type=float, help='Window size for spectrogram in seconds')
@@ -99,6 +99,10 @@ parser.add_argument('--input_type', type=str, default='char', help='char or bpe 
 # Post-training factorization
 parser.add_argument('--rank', default=10, type=float, help="rank")
 parser.add_argument('--factorize', action='store_true', help='factorize')
+
+# Training config
+parser.add_argument('--copy-grad', action='store_true', help="copy grad for MAML") # Useless
+parser.add_argument('--cpu-state-dict', action='store_true', help='store state dict in cpu')
 
 torch.manual_seed(123456)
 torch.cuda.manual_seed_all(123456)
@@ -192,4 +196,4 @@ if __name__ == '__main__':
     print("Parameters: {}(trainable), {}(non-trainable)".format(compute_num_params(model)[0], compute_num_params(model)[1]))
 
     trainer = MetaTrainer()
-    trainer.train(model, vocab, train_data_list, valid_loader_list, loss_type, start_epoch, num_epochs, args, evaluate_every=args.evaluate_every, last_metrics=metrics, early_stop=args.early_stop)
+    trainer.train(model, vocab, train_data_list, valid_loader_list, loss_type, start_epoch, num_epochs, args, evaluate_every=args.evaluate_every, last_metrics=metrics, early_stop=args.early_stop, cpu_state_dict=args.cpu_state_dict, is_copy_grad=args.copy_grad)
