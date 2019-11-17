@@ -3,6 +3,7 @@ import numpy as np
 import torch
 import logging
 import sys
+import threading
 
 from copy import deepcopy
 from tqdm import tqdm
@@ -108,13 +109,25 @@ class MetaTrainer():
         last_sum_cer = deque(maxlen=window_size)
         last_sum_char = deque(maxlen=window_size)
         
-        # Sequentially fetch first batch data from all manifest
-        # TODO
-            
+        # Define local variables
         k_train, k_valid = args.k_train, args.k_valid
+        train_data_buffer = [[] for manifest_id in range(len(train_data_list))]
+        
+        # Define batch loader function
+        def fetch_train_batch(train_data_list, k_train, k_valid, train_buffer):
+            for manifest_id in range(len(train_data_list)):
+                batch_data = train_data_list[manifest_id].sample(k_train, k_valid, manifest_id)
+                train_buffer[manifest_id].insert(0, batch_data)
+            return train_buffer
+
+        # Sequentially fetch first batch data from all manifest
+        train_data_buffer = fetch_train_batch(train_data_list, k_train, k_valid, train_data_buffer)
+            
         for it in range(start_it, num_it):
             # Parallelly fetch next batch data from all manifest
-            # TODO
+            prefetch = threading.Thread(target=fetch_train_batch, 
+                                            args=([train_data_list, k_train, k_valid, train_data_buffer]))
+            prefetch.start()
             
             # Start execution time
             start_time = time.time()
@@ -142,7 +155,7 @@ class MetaTrainer():
                 # torch.cuda.empty_cache()
                 
                 # Retrieve manifest data
-                tr_data, val_data = train_data_list[manifest_id].sample(k_train, k_valid, manifest_id)
+                tr_data, val_data = train_data_buffer[manifest_id][0]
                 tr_inputs, tr_input_sizes, tr_percentages, tr_targets, tr_target_sizes = tr_data
                 val_inputs, val_input_sizes, val_percentages, val_targets, val_target_sizes = val_data
                 
@@ -157,7 +170,6 @@ class MetaTrainer():
                     val_targets = val_targets.cuda()
                     val_target_sizes = val_target_sizes.cuda()
                 
-            
                 # Meta Train
                 model.train()
                 tr_loss, tr_cer, tr_num_char = self.forward_one_batch(model, vocab, tr_inputs, tr_targets, tr_percentages, tr_input_sizes, tr_target_sizes, smoothing, loss_type, verbose=False)
@@ -226,7 +238,9 @@ class MetaTrainer():
                 logging.info("(Summary Iteration {} | MA {}) TRAIN LOSS:{:.4f} CER:{:.2f}%".format(
                     (it+1), window_size, sum(last_sum_loss)/len(last_sum_loss), sum(last_sum_cer)*100/sum(last_sum_char)))
             
-
+            # Wait until the next train batch is ready
+            prefetch.join()
+            
             # VALID
             if (it + 1) % evaluate_every == 0:
                 print("")
