@@ -333,6 +333,6 @@ class MetaTrainer():
             except KeyboardInterrupt:
                 raise
             except:
-                print('!!BUSET!!', flush=True)
-                logging.info("!!BUSET!!")
+                print('Memory Error: Batch data too large, fetching new data...', flush=True)
+                logging.info("Memory Error: Batch data too large, fetching new data...")
                 continue
