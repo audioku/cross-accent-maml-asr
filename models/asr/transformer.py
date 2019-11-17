@@ -174,9 +174,7 @@ class Transformer(nn.Module):
             self.copy_grad = self.init_copy_grad_()
 
         for i, param in enumerate(self.parameters()):
-            if i == 0:
-                print('param.grad', param.grad.sum())
-            self.copy_grad[i] += param.grad
+            self.copy_grad[i].data += param.grad.data
 
     # Copy model grad to copy_grad
     def to_copy_grad(self):
