@@ -38,7 +38,7 @@ class JointTrainer():
         seq_length = pred.size(1)
         sizes = src_percentages.mul_(int(seq_length)).int()
 
-        loss, num_correct = calculate_metrics(pred, gold, vocab.PAD_ID, input_lengths=sizes, target_lengths=trg_lengths, smoothing=smoothing, loss_type=loss_type)
+        loss, _ = calculate_metrics(pred, gold, vocab.PAD_ID, input_lengths=sizes, target_lengths=trg_lengths, smoothing=smoothing, loss_type=loss_type)
 
         if loss is None:
             print("loss is None")
@@ -133,26 +133,20 @@ class JointTrainer():
             prefetch = threading.Thread(target=fetch_train_batch, 
                             args=([train_data_list, k_train, 1, train_data_buffer]))
             prefetch.start()
-            
-            weights_original = None
-            train_tmp_buffer = None
+                        
+            # Buffer for accumulating loss
+            batch_loss = 0
+            total_loss, total_cer = 0, 0
+            total_char = 0
+                
+            # Local variables
+            tr_inputs, tr_input_sizes, tr_percentages, tr_targets, tr_target_sizes  = None, None, None, None, None
+            val_inputs, val_input_sizes, val_percentages, val_targets, val_target_sizes = None, None, None, None, None
+            tr_loss, val_loss = None, None
             
             try:
                 # Start execution time
                 start_time = time.time()
-
-                # Prepare model state dict (Based on experiment it doesn't yield any difference)
-                if cpu_state_dict:
-                    model.cpu()
-                    weights_original = deepcopy(model.state_dict())
-                    model.cuda()
-                else:
-                    weights_original = deepcopy(model.state_dict())
-
-                # Buffer for accumulating loss
-                batch_loss = 0
-                total_loss, total_cer = 0, 0
-                total_char = 0
 
                 # Reinit outer opt
                 opt.zero_grad()
@@ -166,6 +160,7 @@ class JointTrainer():
                     train_tmp_buffer.insert(0, train_data_buffer[manifest_id].pop())
                     
                 # Loop over all tasks
+                model.train()
                 for manifest_id in range(len(train_tmp_buffer)):                
                     # Retrieve manifest data
                     tr_data, val_data = train_tmp_buffer.pop()
@@ -174,17 +169,9 @@ class JointTrainer():
 
                     if args.cuda:
                         tr_inputs = tr_inputs.cuda()
-                        tr_input_sizes = tr_input_sizes.cuda()
                         tr_targets = tr_targets.cuda()
-                        tr_target_sizes = tr_target_sizes.cuda()
-
-                        val_inputs = val_inputs.cuda()
-                        val_input_sizes = val_input_sizes.cuda()
-                        val_targets = val_targets.cuda()
-                        val_target_sizes = val_target_sizes.cuda()
 
                     # Train
-                    model.train()
                     tr_loss, tr_cer, tr_num_char = self.forward_one_batch(model, vocab, tr_inputs, tr_targets, tr_percentages, tr_input_sizes, tr_target_sizes, smoothing, loss_type, verbose=False)
 
                     # Update train evaluation metric                    
@@ -193,18 +180,10 @@ class JointTrainer():
 
                     # Delete unused references
                     del tr_inputs, tr_input_sizes, tr_percentages, tr_targets, tr_target_sizes, tr_data
-
-                    # Inner Backward
-                    opt.zero_grad()
-                    
+                                        
                     # outer loop optimization
-                    if is_copy_grad:
-                        tr_loss = tr_loss / len(train_data_list)
-                        tr_loss.backward()
-
-                        model.add_copy_grad() # add model grad to copy grad
-                    else:
-                        batch_loss += tr_loss / len(train_data_list)
+                    tr_loss = tr_loss / len(train_data_list)
+                    tr_loss.backward()
                     
                     # batch_loss += val_loss
                     total_loss += tr_loss.item()
@@ -212,19 +191,7 @@ class JointTrainer():
                     # Delete unused references
                     del tr_loss
                     
-                    # Reset Weight
-                    model.load_state_dict(weights_original)
-                
-                # Delete copy weight
-                weights_original = None
-                
-                # Outer loop optimization
-                if is_copy_grad:
-                    model.from_copy_grad() # copy grad from copy_grad to model
-                else:
-                    batch_loss.backward()
-                    del batch_loss
-                
+                # Outer loop optimization                
                 if args.clip:
                     torch.nn.utils.clip_grad_norm_(model.parameters(), args.max_norm)
                 opt.step()
@@ -337,7 +304,9 @@ class JointTrainer():
                 print('Error: {}, fetching new data...'.format(e), flush=True)
                 logging.info('Error: {}, fetching new data...'.format(e))
                     
-                weights_original = None
-                batch_loss = 0
+                tr_inputs, tr_input_sizes, tr_percentages, tr_targets, tr_target_sizes = None, None, None, None, None
+                val_inputs, val_input_sizes, val_percentages, val_targets, val_target_sizes = None, None, None, None, None  
+                tr_loss, val_loss = None, None
+                batch_loss = None
         
                 torch.cuda.empty_cache()

@@ -38,7 +38,7 @@ class MetaTrainer():
         seq_length = pred.size(1)
         sizes = src_percentages.mul_(int(seq_length)).int()
 
-        loss, num_correct = calculate_metrics(pred, gold, vocab.PAD_ID, input_lengths=sizes, target_lengths=trg_lengths, smoothing=smoothing, loss_type=loss_type)
+        loss, _ = calculate_metrics(pred, gold, vocab.PAD_ID, input_lengths=sizes, target_lengths=trg_lengths, smoothing=smoothing, loss_type=loss_type)
 
         if loss is None:
             print("loss is None")
@@ -135,9 +135,15 @@ class MetaTrainer():
                             args=([train_data_list, k_train, k_valid, train_data_buffer]))
             prefetch.start()
             
+            # Buffer for accumulating loss
+            batch_loss = 0
+            total_loss, total_cer = 0, 0
+            total_char = 0
+                
+            # Local variables
             weights_original = None
             train_tmp_buffer = None
-            
+                        
             try:
                 # Start execution time
                 start_time = time.time()
@@ -149,11 +155,6 @@ class MetaTrainer():
                     model.cuda()
                 else:
                     weights_original = deepcopy(model.state_dict())
-
-                # Buffer for accumulating loss
-                batch_loss = 0
-                total_loss, total_cer = 0, 0
-                total_char = 0
 
                 # Reinit outer opt
                 outer_opt.zero_grad()
@@ -172,17 +173,9 @@ class MetaTrainer():
                     tr_data, val_data = train_tmp_buffer.pop()
                     tr_inputs, tr_input_sizes, tr_percentages, tr_targets, tr_target_sizes = tr_data
                     val_inputs, val_input_sizes, val_percentages, val_targets, val_target_sizes = val_data
-
                     if args.cuda:
                         tr_inputs = tr_inputs.cuda()
-                        tr_input_sizes = tr_input_sizes.cuda()
                         tr_targets = tr_targets.cuda()
-                        tr_target_sizes = tr_target_sizes.cuda()
-
-                        val_inputs = val_inputs.cuda()
-                        val_input_sizes = val_input_sizes.cuda()
-                        val_targets = val_targets.cuda()
-                        val_target_sizes = val_target_sizes.cuda()
 
                     # Meta Train
                     model.train()
@@ -207,6 +200,9 @@ class MetaTrainer():
                         torch.nn.utils.clip_grad_norm_(model.parameters(), args.max_norm)
                     inner_opt.step()
                     
+                    if args.cuda:
+                        val_inputs = val_inputs.cuda()
+                        val_targets = val_targets.cuda()
 
                     # Meta Validation 
                     val_loss, val_cer, val_num_char = self.forward_one_batch(model, vocab, val_inputs, val_targets, val_percentages, val_input_sizes, val_target_sizes, smoothing, loss_type)
@@ -358,7 +354,10 @@ class MetaTrainer():
             except Exception as e:
                 print('Error: {}, fetching new data...'.format(e), flush=True)
                 logging.info('Error: {}, fetching new data...'.format(e))
-                    
+
+                tr_inputs, tr_input_sizes, tr_percentages, tr_targets, tr_target_sizes = None, None, None, None, None
+                val_inputs, val_input_sizes, val_percentages, val_targets, val_target_sizes = None, None, None, None, None       
+                tr_loss, val_loss = None, None
                 weights_original = None
                 batch_loss = 0
         
