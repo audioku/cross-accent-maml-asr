@@ -41,6 +41,36 @@ def compute_num_params(model):
     sizes = [(np.array(p.data.size()).prod(), int(p.requires_grad)) for p in model.parameters()]
     return sum(map(lambda t: t[0]*t[1], sizes)), sum(map(lambda t: t[0]*(1 - t[1]), sizes))
 
+def save_joint_model(model, vocab, epoch, opt, metrics, args, best_model=False):
+    """
+    Saving model, TODO adding history
+    """
+    if best_model:
+        save_path = "{}/{}/best_model.th".format(
+            args.save_folder, args.name)
+    else:
+        save_path = "{}/{}/epoch_{}.th".format(args.save_folder,
+                                               args.name, epoch)
+
+    if not os.path.exists(args.save_folder + "/" + args.name):
+        os.makedirs(args.save_folder + "/" + args.name)
+
+    print("SAVE MODEL to", save_path)
+    logging.info("SAVE MODEL to " + save_path)
+    if args.loss == "ce":
+        args = {
+            'vocab': vocab,
+            'args': args,
+            'epoch': epoch,
+            'model_state_dict': model.state_dict(),
+            'opt': opt,
+            'metrics': metrics
+        }
+    else:
+        print("Loss is not defined")
+        logging.info("Loss is not defined")
+    torch.save(args, save_path)
+
 def save_meta_model(model, vocab, epoch, inner_opt, outer_opt, metrics, args, best_model=False):
     """
     Saving model, TODO adding history

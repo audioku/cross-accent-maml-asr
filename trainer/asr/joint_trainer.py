@@ -10,7 +10,7 @@ from copy import deepcopy
 from tqdm import tqdm
 # from utils import constant
 from collections import deque
-from utils.functions import save_meta_model, post_process
+from utils.functions import save_meta_model, save_joint_model, post_process
 from utils.optimizer import NoamOpt
 from utils.metrics import calculate_metrics, calculate_cer, calculate_wer
 from torch.autograd import Variable
@@ -109,7 +109,7 @@ class JointTrainer():
         last_sum_char = deque(maxlen=window_size)
         
         # Define local variables
-        k_train, k_valid = args.k_train, args.k_valid
+        k_train = args.k_train
         train_data_buffer = [[] for manifest_id in range(len(train_data_list))]
         
         # Define batch loader function
@@ -121,7 +121,7 @@ class JointTrainer():
 
          # Parallelly fetch next batch data from all manifest
         prefetch = threading.Thread(target=fetch_train_batch, 
-                        args=([train_data_list, k_train, 0, train_data_buffer]))
+                        args=([train_data_list, k_train, 1, train_data_buffer]))
         prefetch.start()
         
         it = start_it
@@ -131,7 +131,7 @@ class JointTrainer():
             
             # Parallelly fetch next batch data from all manifest
             prefetch = threading.Thread(target=fetch_train_batch, 
-                            args=([train_data_list, k_train, 0, train_data_buffer]))
+                            args=([train_data_list, k_train, 1, train_data_buffer]))
             prefetch.start()
             
             weights_original = None
@@ -155,7 +155,7 @@ class JointTrainer():
                 total_char = 0
 
                 # Reinit outer opt
-                outer_opt.zero_grad()
+                opt.zero_grad()
                 if is_copy_grad:
                     model.zero_copy_grad() # initialize copy_grad with 0
 
@@ -240,9 +240,9 @@ class JointTrainer():
                 total_time += diff_time
 
                 print("(Iteration {}) TRAIN LOSS:{:.4f} CER:{:.2f}% LR:{:.7f} TOTAL TIME:{:.7f}".format(
-                    (it+1), total_loss/len(train_data_list), total_cer*100/total_char, self.get_lr(outer_opt), total_time))         
+                    (it+1), total_loss/len(train_data_list), total_cer*100/total_char, self.get_lr(opt), total_time))         
                 logging.info("(Iteration {}) TRAIN LOSS:{:.4f} CER:{:.2f}% LR:{:.7f} TOTAL TIME:{:.7f}".format(
-                    (it+1), total_loss/len(train_data_list), total_cer*100/total_char, self.get_lr(outer_opt), total_time))
+                    (it+1), total_loss/len(train_data_list), total_cer*100/total_char, self.get_lr(opt), total_time))
 
                 if (it + 1) % last_summary_every == 0:
                     print("(Summary Iteration {} | MA {}) TRAIN LOSS:{:.4f} CER:{:.2f}%".format(
@@ -301,7 +301,7 @@ class JointTrainer():
                     logging.info("AVG VALID LOSS:{:.4f} AVG CER:{:.2f}%".format(sum(final_valid_losses) / len(final_valid_losses), sum(final_valid_cers) / len(final_valid_cers)))
 
                     if (it+1) % args.save_every == 0:
-                        save_meta_model(model, vocab, (it+1), inner_opt, outer_opt, metrics, args, best_model=False)
+                        save_joint_model(model, vocab, (it+1), opt, metrics, args, best_model=False)
 
                     # save the best model
                     early_stop_criteria, early_stop_val
@@ -310,7 +310,7 @@ class JointTrainer():
                         if best_valid_val > avg_valid_cer:
                             count_stop = 0
                             best_valid_val = avg_valid_cer
-                            save_meta_model(model, vocab, (it+1), inner_opt, outer_opt, metrics, args, best_model=True)
+                            save_joint_model(model, vocab, (it+1), opt, metrics, args, best_model=True)
                         else:
                             print("count_stop:", count_stop)
                             count_stop += 1

@@ -7,11 +7,13 @@ import torch.nn as nn
 
 from torch.autograd import Variable
 from tqdm import tqdm
-from models.asr.transformer import Transformer, Encoder, Decoder
+from models.asr.transformer import Transformer
+from modules.encoder import Encoder
+from modules.decoder import Decoder
 from utils.data_loader import SpectrogramDataset, LogFBankDataset, AudioDataLoader, BucketingSampler
 from utils.optimizer import NoamOpt
 from utils.metrics import calculate_metrics, calculate_cer, calculate_wer, calculate_cer_en_zh
-from utils.functions import save_model, load_model, post_process, compute_num_params
+from utils.functions import save_model, load_model, load_meta_model, post_process, compute_num_params
 
 parser = argparse.ArgumentParser(description='Transformer ASR training')
 parser.add_argument('--model', default='TRFS', type=str, help="")
@@ -22,7 +24,7 @@ parser.add_argument('--valid-manifest-list', nargs='+', type=str)
 parser.add_argument('--test-manifest-list', nargs='+', type=str)
 
 parser.add_argument('--sample-rate', default=22050, type=int, help='Sample rate')
-parser.add_argument('--batch-size', default=20, type=int, help='Batch size for training')
+parser.add_argument('--k-test', default=20, type=int, help='Batch size for training')
 parser.add_argument('--num-workers', default=4, type=int, help='Number of workers used in data-loading')
 parser.add_argument('--labels-path', default='labels.json', help='Contains all characters for transcription')
 parser.add_argument('--label-smoothing', default=0.0, type=float, help='Label smoothing')
@@ -136,8 +138,8 @@ def evaluate(model, vocab, test_loader, args, start_token=-1):
                 src, src_lengths, trg, args, beam_search=args.beam_search, beam_width=args.beam_width, beam_nbest=args.beam_nbest, c_weight=args.c_weight, start_token=start_token, verbose=args.verbose)
 
             for x in range(len(batch_strs_gold)):
-                hyp = post_process(batch_strs_hyps[x], vocab)
-                gold = post_process(batch_strs_gold[x], vocab)
+                hyp = post_process(batch_strs_hyps[x], vocab.special_token_list)
+                gold = post_process(batch_strs_gold[x], vocab.special_token_list)
 
                 wer = calculate_wer(hyp, gold)
                 cer = calculate_cer(hyp.strip(), gold.strip())
@@ -173,7 +175,8 @@ if __name__ == '__main__':
 
     # Load the model
     load_path = args.continue_from
-    model, vocab, opt, epoch, metrics, loaded_args = load_model(args.continue_from, train=False)
+    # model, vocab, opt, epoch, metrics, loaded_args = load_model(args.continue_from, train=False)
+    model, vocab, inner_opt, outer_opt, epoch, metrics, loaded_args = load_meta_model(args.continue_from, train=False)
     
     print("EPOCH:", epoch)
 
@@ -192,14 +195,8 @@ if __name__ == '__main__':
         test_data = SpectrogramDataset(vocab, args, audio_conf=audio_conf, manifest_filepath_list=[test_manifest_list[0]], normalize=True, augment=False, input_type=args.input_type)
     elif loaded_args.feat == "logfbank":
         test_data = LogFBankDataset(vocab, args, audio_conf=audio_conf, manifest_filepath_list=[test_manifest_list[0]], normalize=True, augment=False, input_type=args.input_type)
-    test_sampler = BucketingSampler(test_data, batch_size=args.batch_size)
-    test_loader = AudioDataLoader(vocab, dataset=test_data, num_workers=args.num_workers, batch_sampler=test_sampler)
-
-    lm = None
-    # if args.lm_rescoring:
-    #     lm = LM(args.lm_path)
-
-    # # print(model)
+    test_sampler = BucketingSampler(test_data, batch_size=args.k_test)
+    test_loader = AudioDataLoader(vocab.PAD_ID, dataset=test_data, num_workers=args.num_workers, batch_sampler=test_sampler)
 
     print("Parameters: {}(trainable), {}(non-trainable)".format(compute_num_params(model)[0], compute_num_params(model)[1]))
 
