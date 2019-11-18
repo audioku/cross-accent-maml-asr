@@ -20,7 +20,7 @@ class MetaTrainer():
     Trainer class
     """
     def __init__(self):
-        logging.info("Trainer is initialized")
+        logging.info("Meta Trainer is initialized")
 
     def forward_one_batch(self, model, vocab, src, trg, src_percentages, src_lengths, trg_lengths, smoothing, loss_type, verbose=False):
         pred, gold, hyp = model(src, src_lengths, trg, verbose=False)
