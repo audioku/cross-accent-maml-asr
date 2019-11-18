@@ -4,6 +4,7 @@ import torch
 import logging
 import sys
 import threading
+import time
 
 from copy import deepcopy
 from tqdm import tqdm
@@ -134,6 +135,9 @@ class MetaTrainer():
                             args=([train_data_list, k_train, k_valid, train_data_buffer]))
             prefetch.start()
             
+            weights_original = None
+            train_tmp_buffer = None
+            
             try:
                 # Start execution time
                 start_time = time.time()
@@ -159,15 +163,13 @@ class MetaTrainer():
                 # Pop buffer for all manifest first
                 # so we can maintain the same number in the buffer list if exception occur
                 train_tmp_buffer = []
-                for manifest_id in range(len(train_data_list)):  
-                    train_tmp_buffer.append(train_data_buffer[manifest_id].pop())
+                for manifest_id in range(len(train_data_buffer)):  
+                    train_tmp_buffer.insert(0, train_data_buffer[manifest_id].pop())
                     
                 # Loop over all tasks
-                for manifest_id in range(len(train_data_list)):                
-                    # torch.cuda.empty_cache()
-
+                for manifest_id in range(len(train_tmp_buffer)):                
                     # Retrieve manifest data
-                    tr_data, val_data = train_tmp_buffer[manifest_id]
+                    tr_data, val_data = train_tmp_buffer.pop()
                     tr_inputs, tr_input_sizes, tr_percentages, tr_targets, tr_target_sizes = tr_data
                     val_inputs, val_input_sizes, val_percentages, val_targets, val_target_sizes = val_data
 
@@ -190,44 +192,61 @@ class MetaTrainer():
                     total_cer += tr_cer
                     total_char += tr_num_char
 
-                    # Inner Update
+                    # Delete unused references
+                    del tr_inputs, tr_input_sizes, tr_percentages, tr_targets, tr_target_sizes, tr_data
+
+                    # Inner Backward
                     inner_opt.zero_grad()
                     tr_loss.backward()
+                    
+                    # Delete unused references
+                    del tr_loss
+                    
+                    # Inner Update
                     if args.clip:
                         torch.nn.utils.clip_grad_norm_(model.parameters(), args.max_norm)
                     inner_opt.step()
+                    
 
                     # Meta Validation 
                     val_loss, val_cer, val_num_char = self.forward_one_batch(model, vocab, val_inputs, val_targets, val_percentages, val_input_sizes, val_target_sizes, smoothing, loss_type)
 
                     # batch_loss += val_loss
                     total_loss += val_loss.item()
+                    
+                    # Delete unused references
+                    del val_inputs, val_input_sizes, val_percentages, val_targets, val_target_sizes, val_data
 
                     # outer loop optimization
                     if is_copy_grad:
-                        batch_loss = val_loss / len(train_data_list)
-                        batch_loss.backward()
+                        val_loss = val_loss / len(train_data_list)
+                        val_loss.backward()
 
                         model.add_copy_grad() # add model grad to copy grad
                     else:
                         batch_loss += val_loss / len(train_data_list)
 
+                    # Delete unused references
+                    del val_loss
+                    
                     # Reset Weight
                     model.load_state_dict(weights_original)
-
+                
                 # Delete copy weight
-                del weights_original
-
+                weights_original = None
+                
                 # Outer loop optimization
                 if is_copy_grad:
                     model.from_copy_grad() # copy grad from copy_grad to model
                 else:
                     batch_loss.backward()
-
+                    del batch_loss
+                
                 if args.clip:
                     torch.nn.utils.clip_grad_norm_(model.parameters(), args.max_norm)
                 outer_opt.step()
 
+                
                 # Record performance
                 last_sum_cer.append(total_cer)
                 last_sum_char.append(total_char)
@@ -332,7 +351,11 @@ class MetaTrainer():
                 it += 1
             except KeyboardInterrupt:
                 raise
-            except:
-                print('Memory Error: Batch data too large, fetching new data...', flush=True)
-                logging.info("Memory Error: Batch data too large, fetching new data...")
-                continue
+            except Exception as e:
+                print('Error: {}, fetching new data...'.format(e), flush=True)
+                logging.info('Error: {}, fetching new data...'.format(e))
+                    
+                weights_original = None
+                batch_loss = 0
+        
+                torch.cuda.empty_cache()

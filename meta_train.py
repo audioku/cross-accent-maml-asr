@@ -113,6 +113,7 @@ random.seed(123456)
 
 args = parser.parse_args()
 USE_CUDA = args.cuda
+torch.set_num_threads(args.num_workers)
 
 if __name__ == '__main__':
     print("="*50)
