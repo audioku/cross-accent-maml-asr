@@ -296,6 +296,8 @@ class MetaTrainer():
                                 total_valid_loss += loss.item()
                                 valid_pbar.set_description("VALID SET {} LOSS:{:.4f} CER:{:.2f}%".format(ind,
                                     total_valid_loss/(i+1), total_valid_cer*100/total_valid_char))
+                                
+                                del src, trg, src_percentages, src_lengths, trg_lengths
 
                             final_valid_loss = total_valid_loss/(len(valid_loader))
                             final_valid_cer = total_valid_cer*100/total_valid_char
@@ -304,6 +306,8 @@ class MetaTrainer():
                             final_valid_cers.append(final_valid_cer)
                             print("VALID SET {} LOSS:{:.4f} CER:{:.2f}%".format(ind, final_valid_loss, final_valid_cer))
                             logging.info("VALID SET {} LOSS:{:.4f} CER:{:.2f}%".format(ind, final_valid_loss, final_valid_cer))
+
+                            del total_valid_loss, total_valid_cer, total_valid_wer, total_valid_char, total_valid_word 
 
                     metrics = {}
                     avg_valid_loss = sum(final_valid_losses) / len(final_valid_losses)
