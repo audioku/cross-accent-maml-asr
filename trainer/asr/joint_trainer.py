@@ -14,7 +14,7 @@ from utils.optimizer import NoamOpt
 from utils.metrics import calculate_metrics, calculate_cer, calculate_wer
 from torch.autograd import Variable
 
-class MetaTrainer():
+class JointTrainer():
     """
     Trainer class
     """
@@ -101,15 +101,14 @@ class MetaTrainer():
         model.train()
 
         # define the optimizer
-        inner_opt = torch.optim.SGD(model.parameters(), lr=args.lr)
-        outer_opt = torch.optim.Adam(model.parameters(), lr=args.meta_lr)
+        opt = torch.optim.Adam(model.parameters(), lr=args.lr)
 
         last_sum_loss = deque(maxlen=window_size)
         last_sum_cer = deque(maxlen=window_size)
         last_sum_char = deque(maxlen=window_size)
         
         # Define local variables
-        k_train, k_valid = args.k_train, args.k_valid
+        k_train = args.k_train
         train_data_buffer = [[] for manifest_id in range(len(train_data_list))]
         
         # Define batch loader function
@@ -121,7 +120,7 @@ class MetaTrainer():
 
          # Parallelly fetch next batch data from all manifest
         prefetch = threading.Thread(target=fetch_train_batch, 
-                        args=([train_data_list, k_train, k_valid, train_data_buffer]))
+                        args=([train_data_list, k_train, 0, train_data_buffer]))
         prefetch.start()
         
         it = start_it
@@ -131,7 +130,7 @@ class MetaTrainer():
             
             # Parallelly fetch next batch data from all manifest
             prefetch = threading.Thread(target=fetch_train_batch, 
-                            args=([train_data_list, k_train, k_valid, train_data_buffer]))
+                            args=([train_data_list, k_train, 0, train_data_buffer]))
             prefetch.start()
             
             try:
@@ -169,7 +168,6 @@ class MetaTrainer():
                     # Retrieve manifest data
                     tr_data, val_data = train_tmp_buffer[manifest_id]
                     tr_inputs, tr_input_sizes, tr_percentages, tr_targets, tr_target_sizes = tr_data
-                    val_inputs, val_input_sizes, val_percentages, val_targets, val_target_sizes = val_data
 
                     if args.cuda:
                         tr_inputs = tr_inputs.cuda()
@@ -177,12 +175,6 @@ class MetaTrainer():
                         tr_targets = tr_targets.cuda()
                         tr_target_sizes = tr_target_sizes.cuda()
 
-                        val_inputs = val_inputs.cuda()
-                        val_input_sizes = val_input_sizes.cuda()
-                        val_targets = val_targets.cuda()
-                        val_target_sizes = val_target_sizes.cuda()
-
-                    # Meta Train
                     model.train()
                     tr_loss, tr_cer, tr_num_char = self.forward_one_batch(model, vocab, tr_inputs, tr_targets, tr_percentages, tr_input_sizes, tr_target_sizes, smoothing, loss_type, verbose=False)
 
@@ -190,27 +182,17 @@ class MetaTrainer():
                     total_cer += tr_cer
                     total_char += tr_num_char
 
-                    # Inner Update
-                    inner_opt.zero_grad()
-                    tr_loss.backward()
-                    if args.clip:
-                        torch.nn.utils.clip_grad_norm_(model.parameters(), args.max_norm)
-                    inner_opt.step()
-
-                    # Meta Validation 
-                    val_loss, val_cer, val_num_char = self.forward_one_batch(model, vocab, val_inputs, val_targets, val_percentages, val_input_sizes, val_target_sizes, smoothing, loss_type)
-
                     # batch_loss += val_loss
-                    total_loss += val_loss.item()
+                    total_loss += tr_loss.item()
 
                     # outer loop optimization
                     if is_copy_grad:
-                        batch_loss = val_loss / len(train_data_list)
+                        batch_loss = tr_loss / len(train_data_list)
                         batch_loss.backward()
 
                         model.add_copy_grad() # add model grad to copy grad
                     else:
-                        batch_loss += val_loss / len(train_data_list)
+                        batch_loss += tr_loss / len(train_data_list)
 
                     # Reset Weight
                     model.load_state_dict(weights_original)
@@ -226,7 +208,7 @@ class MetaTrainer():
 
                 if args.clip:
                     torch.nn.utils.clip_grad_norm_(model.parameters(), args.max_norm)
-                outer_opt.step()
+                opt.step()
 
                 # Record performance
                 last_sum_cer.append(total_cer)
