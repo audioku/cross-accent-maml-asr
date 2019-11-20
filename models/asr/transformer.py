@@ -138,6 +138,7 @@ class Transformer(nn.Module):
 
         encoder_padded_outputs, _ = self.encoder(padded_input, input_lengths)
         pred_list, gold_list, *_ = self.decoder(padded_target, encoder_padded_outputs, input_lengths)
+        
         strs_gold = ["".join([self.vocab.id2label[int(x)] for x in gold_seq]) for gold_seq in gold_list]
 
         if beam_search:

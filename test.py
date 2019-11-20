@@ -123,7 +123,7 @@ def evaluate(model, vocab, test_loader, args, start_token=-1):
     total_time = 0
 
     with torch.no_grad():
-        test_pbar = tqdm(iter(test_loader), leave=True, total=len(test_loader))
+        test_pbar = tqdm(iter(test_loader), leave=False, total=len(test_loader))
         for i, (data) in enumerate(test_pbar):
             src, trg, src_percentages, src_lengths, trg_lengths = data
 
@@ -165,6 +165,8 @@ def evaluate(model, vocab, test_loader, args, start_token=-1):
             diff_time_per_word = total_time / total_word
 
             test_pbar.set_description("TEST CER:{:.2f}% WER:{:.2f}% CER_EN:{:.2f}% CER_ZH:{:.2f}% TOTAL_TIME:{:.7f} TOTAL HYP CHAR:{:.2f}".format(
+                total_cer*100/total_char, total_wer*100/total_word, total_en_cer*100/max(1, total_en_char), total_zh_cer*100/max(1, total_zh_char), total_time, total_hyp_char))
+            print("TEST CER:{:.2f}% WER:{:.2f}% CER_EN:{:.2f}% CER_ZH:{:.2f}% TOTAL_TIME:{:.7f} TOTAL HYP CHAR:{:.2f}".format(
                 total_cer*100/total_char, total_wer*100/total_word, total_en_cer*100/max(1, total_en_char), total_zh_cer*100/max(1, total_zh_char), total_time, total_hyp_char))
 
 
