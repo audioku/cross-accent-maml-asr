@@ -192,7 +192,7 @@ def load_joint_model(load_path, train=True):
     else:
         model = model.cpu()
 
-    opt = torch.optim.Adam(model.parameters(), lr=args.meta_lr)
+    opt = torch.optim.Adam(model.parameters(), lr=args.lr)
     opt.load_state_dict(checkpoint['opt'].state_dict())
 
     return model, vocab, opt, epoch, metrics, args
