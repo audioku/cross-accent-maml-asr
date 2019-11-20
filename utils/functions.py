@@ -167,7 +167,7 @@ def load_meta_model(load_path, train=True):
 
     return model, vocab, inner_opt, outer_opt, epoch, metrics, args
 
-def load_model(load_path, train=True):
+def load_joint_model(load_path, train=True):
     """
     Loading model
     args:
