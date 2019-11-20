@@ -87,19 +87,15 @@ def save_meta_model(model, vocab, epoch, inner_opt, outer_opt, metrics, args, be
 
     print("SAVE MODEL to", save_path)
     logging.info("SAVE MODEL to " + save_path)
-    if args.loss == "ce":
-        args = {
-            'vocab': vocab,
-            'args': args,
-            'epoch': epoch,
-            'model_state_dict': model.state_dict(),
-            'inner_opt': inner_opt,
-            'outer_opt': outer_opt,
-            'metrics': metrics
-        }
-    else:
-        print("Loss is not defined")
-        logging.info("Loss is not defined")
+    args = {
+        'vocab': vocab,
+        'args': args,
+        'epoch': epoch,
+        'model_state_dict': model.state_dict(),
+        'inner_opt': inner_opt,
+        'outer_opt': outer_opt,
+        'metrics': metrics
+    }
     torch.save(args, save_path)
 
 def save_model(model, vocab, epoch, opt, metrics, args, best_model=False):
@@ -156,10 +152,6 @@ def load_meta_model(load_path, train=True):
     is_factorized = args.is_factorized
     r = args.r
 
-    # args.feat_extractor = "vgg_cnn"
-    args.k_lr = 1
-    args.min_lr = 1e-6
-
     model = init_transformer_model(args, vocab, train=train, is_factorized=is_factorized, r=r)
     model.load_state_dict(checkpoint['model_state_dict'])
     if args.cuda:
@@ -168,8 +160,10 @@ def load_meta_model(load_path, train=True):
     else:
         model = model.cpu()
 
-    inner_opt = checkpoint['inner_opt']
-    outer_opt = checkpoint['outer_opt']
+    inner_opt = torch.optim.SGD(model.parameters(), lr=args.lr)
+    outer_opt = torch.optim.Adam(model.parameters(), lr=args.meta_lr)
+    inner_opt.load_state_dict(checkpoint['inner_opt'].state_dict())
+    outer_opt.load_state_dict(checkpoint['outer_opt'].state_dict())
 
     return model, vocab, inner_opt, outer_opt, epoch, metrics, args
 

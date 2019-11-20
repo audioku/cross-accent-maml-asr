@@ -70,8 +70,13 @@ parser.add_argument('--src-max-len', default=2500, type=int, help='Source max le
 parser.add_argument('--tgt-max-len', default=1000, type=int, help='Target max length')
 
 # optimizer
-parser.add_argument('--lr', default=1e-2, type=float, help='lr')
+parser.add_argument('--lr', default=1e-4, type=float, help='lr')
 parser.add_argument('--evaluate-every', default=1000, type=int, help='evaluate every')
+
+# Noam optimizer
+parser.add_argument('--warmup', default=4000, type=int, help='Warmup')
+parser.add_argument('--min-lr', default=1e-5, type=float, help='min lr')
+parser.add_argument('--k-lr', default=1, type=float, help='factor lr')
 
 # Decoder search
 parser.add_argument('--beam-search', action='store_true', help='Beam search')
@@ -101,6 +106,9 @@ parser.add_argument('--factorize', action='store_true', help='factorize')
 # Training config
 parser.add_argument('--copy-grad', action='store_true', help="copy grad for MAML") # Useless
 parser.add_argument('--cpu-state-dict', action='store_true', help='store state dict in cpu')
+
+# Finetune
+parser.add_argument('--finetune', action='store_true', help="") 
 
 torch.manual_seed(123456)
 torch.cuda.manual_seed_all(123456)

@@ -76,7 +76,7 @@ class MetaTrainer():
         for param_group in optimizer.param_groups:
             return param_group['lr']
 
-    def train(self, model, vocab, train_data_list, valid_loader_list, loss_type, start_it, num_it, args, evaluate_every=1000, window_size=100, last_summary_every=10, last_metrics=None, early_stop=10, cpu_state_dict=False, is_copy_grad=False):
+    def train(self, model, vocab, train_data_list, valid_loader_list, loss_type, start_it, num_it, args, inner_opt=None, outer_opt=None, evaluate_every=1000, window_size=100, last_summary_every=10, last_metrics=None, early_stop=10, cpu_state_dict=False, is_copy_grad=False):
         """
         Training
         args:
@@ -102,8 +102,11 @@ class MetaTrainer():
         model.train()
 
         # define the optimizer
-        inner_opt = torch.optim.SGD(model.parameters(), lr=args.lr)
-        outer_opt = torch.optim.Adam(model.parameters(), lr=args.meta_lr)
+        if inner_opt is None:
+            inner_opt = torch.optim.SGD(model.parameters(), lr=args.lr)
+        
+        if outer_opt is None:
+            outer_opt = torch.optim.Adam(model.parameters(), lr=args.meta_lr)
 
         last_sum_loss = deque(maxlen=window_size)
         last_sum_cer = deque(maxlen=window_size)

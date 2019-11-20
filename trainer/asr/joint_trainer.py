@@ -103,6 +103,7 @@ class JointTrainer():
 
         # define the optimizer
         opt = torch.optim.Adam(model.parameters(), lr=args.lr)
+        # opt = NoamOpt(args.dim_model, args.k_lr, args.warmup, torch.optim.Adam(model.parameters(), betas=(0.9, 0.98), eps=1e-9), min_lr=args.min_lr)
 
         last_sum_loss = deque(maxlen=window_size)
         last_sum_cer = deque(maxlen=window_size)

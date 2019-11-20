@@ -13,16 +13,14 @@ from modules.decoder import Decoder
 from utils.data_loader import SpectrogramDataset, LogFBankDataset, AudioDataLoader, BucketingSampler
 from utils.optimizer import NoamOpt
 from utils.metrics import calculate_metrics, calculate_cer, calculate_wer, calculate_cer_en_zh
-from utils.functions import save_model, load_model, load_meta_model, post_process, compute_num_params
+from utils.functions import load_meta_model, load_joint_model, post_process, compute_num_params
 
 parser = argparse.ArgumentParser(description='Transformer ASR training')
 parser.add_argument('--model', default='TRFS', type=str, help="")
 parser.add_argument('--name', default='model', help="Name of the model for saving")
-
-parser.add_argument('--train-manifest-list', nargs='+', type=str)
-parser.add_argument('--valid-manifest-list', nargs='+', type=str)
 parser.add_argument('--test-manifest-list', nargs='+', type=str)
 
+parser.add_argument('--training-mode', type=str, default="meta", help="meta or joint")
 parser.add_argument('--sample-rate', default=22050, type=int, help='Sample rate')
 parser.add_argument('--k-test', default=20, type=int, help='Batch size for training')
 parser.add_argument('--num-workers', default=4, type=int, help='Number of workers used in data-loading')
@@ -33,7 +31,7 @@ parser.add_argument('--window-stride', default=.01, type=float, help='Window str
 parser.add_argument('--window', default='hamming', help='Window type for spectrogram generation')
 parser.add_argument('--epochs', default=1000, type=int, help='Number of training epochs')
 parser.add_argument('--cuda', dest='cuda', action='store_true', help='Use cuda to train model')
-# parser.add_argument('--lr', '--learning-rate', default=3e-4, type=float, help='initial learning rate')
+
 parser.add_argument('--early-stop', default="loss,10", type=str, help='Early stop (loss,10) or (cer,10)')
 parser.add_argument('--save-every', default=5, type=int, help='Save model every certain number of epochs')
 parser.add_argument('--save-folder', default='models/', help='Location to save epoch models')
@@ -175,8 +173,10 @@ if __name__ == '__main__':
 
     # Load the model
     load_path = args.continue_from
-    # model, vocab, opt, epoch, metrics, loaded_args = load_model(args.continue_from, train=False)
-    model, vocab, inner_opt, outer_opt, epoch, metrics, loaded_args = load_meta_model(args.continue_from, train=False)
+    if args.training_mode == "meta":
+        model, vocab, inner_opt, outer_opt, epoch, metrics, loaded_args = load_meta_model(args.continue_from, train=False)
+    else:
+        model, vocab, opt, epoch, metrics, loaded_args = load_joint_model(args.continue_from, train=False)
     
     print("EPOCH:", epoch)
 

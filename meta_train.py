@@ -15,7 +15,7 @@ from torch.autograd import Variable
 from trainer.asr.meta_trainer import MetaTrainer
 from utils.data import Vocab
 from utils.data_loader import SpectrogramDataset, LogFBankDataset, AudioDataLoader, BucketingSampler
-from utils.functions import save_model, load_model, init_transformer_model, init_optimizer, compute_num_params, generate_labels
+from utils.functions import load_meta_model, init_transformer_model, init_optimizer, compute_num_params, generate_labels
 
 parser = argparse.ArgumentParser(description='Transformer ASR meta training')
 parser.add_argument('--model', default='TRFS', type=str, help="")
@@ -177,10 +177,11 @@ if __name__ == '__main__':
     loaded_args = None
     if args.continue_from != "":
         logging.info("Continue from checkpoint:" + args.continue_from)
-        model, vocab, opt, epoch, metrics, loaded_args = load_model(args.continue_from)
+        model, vocab, inner_opt, outer_opt, epoch, metrics, loaded_args = load_meta_model(args.continue_from)
         start_epoch = (epoch)  # index starts from zero
         verbose = args.verbose
     else:
+        inner_opt, outer_opt = None, None
         if args.model == "TRFS":
             model = init_transformer_model(args, vocab, is_factorized=args.is_factorized, r=args.r)
         else:
@@ -198,4 +199,4 @@ if __name__ == '__main__':
     logging.info("Parameters: {}(trainable), {}(non-trainable)".format(compute_num_params(model)[0], compute_num_params(model)[1]))
 
     trainer = MetaTrainer()
-    trainer.train(model, vocab, train_data_list, valid_loader_list, loss_type, start_epoch, num_epochs, args, evaluate_every=args.evaluate_every, last_metrics=metrics, early_stop=args.early_stop, cpu_state_dict=args.cpu_state_dict, is_copy_grad=args.copy_grad)
+    trainer.train(model, vocab, train_data_list, valid_loader_list, loss_type, start_epoch, num_epochs, args, inner_opt=inner_opt, outer_opt=outer_opt, evaluate_every=args.evaluate_every, last_metrics=metrics, early_stop=args.early_stop, cpu_state_dict=args.cpu_state_dict, is_copy_grad=args.copy_grad)
