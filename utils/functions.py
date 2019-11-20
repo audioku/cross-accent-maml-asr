@@ -184,6 +184,36 @@ def load_joint_model(load_path, train=True):
     is_factorized = args.is_factorized
     r = args.r
 
+    model = init_transformer_model(args, vocab, train=train, is_factorized=is_factorized, r=r)
+    model.load_state_dict(checkpoint['model_state_dict'])
+    if args.cuda:
+        print("CUDA")
+        model = model.cuda()
+    else:
+        model = model.cpu()
+
+    opt = torch.optim.Adam(model.parameters(), lr=args.meta_lr)
+    opt.load_state_dict(checkpoint['opt'].state_dict())
+
+    return model, vocab, opt, epoch, metrics, args
+
+def load_model(load_path, train=True):
+    """
+    Loading model
+    args:
+        load_path: string
+    """
+    checkpoint = torch.load(load_path, map_location=torch.device('cpu'))
+
+    epoch = checkpoint['epoch']
+    metrics = checkpoint['metrics']
+    if 'args' in checkpoint:
+        args = checkpoint['args']
+
+    vocab = checkpoint['vocab']
+    is_factorized = args.is_factorized
+    r = args.r
+
     # args.feat_extractor = "vgg_cnn"
     args.k_lr = 1
     args.min_lr = 1e-6
