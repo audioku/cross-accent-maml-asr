@@ -142,9 +142,9 @@ class Transformer(nn.Module):
         strs_gold = ["".join([self.vocab.id2label[int(x)] for x in gold_seq]) for gold_seq in gold_list]
 
         if beam_search:
-            ids_hyps, strs_hyps = self.decoder.beam_search(encoder_padded_outputs, args, beam_width=args.beam_width, nbest=args.beam_nbest, c_weight=c_weight, start_token=start_token)
-            # ids_hyps, strs_hyps = decode_beam_search(self.decoder, self.vocab, encoder_padded_outputs, input_lengths, args, beam_width=beam_width, beam_nbest=beam_nbest, c_weight=1, start_token=start_token)
-            print(len(strs_hyps), sizes[0])
+            # ids_hyps, strs_hyps = self.decoder.beam_search(self.vocab, encoder_padded_outputs, args, c_weight=c_weight, start_token=start_token)
+            ids_hyps, strs_hyps = decode_beam_search(self.decoder, self.vocab, encoder_padded_outputs, input_lengths, args, beam_width=beam_width, beam_nbest=beam_nbest, c_weight=1, start_token=start_token)
+            print('len(strs_hyps), sizes[0]', len(strs_hyps), sizes[0], flush=True)
             if len(strs_hyps) != sizes[0]:
                 print(">>>>>>> switch to greedy")
                 # strs_hyps = self.decoder.greedy_search(encoder_padded_outputs, args, start_token=start_token)

@@ -122,7 +122,7 @@ class Decoder(nn.Module):
         output:
             list of hypothesis (string)>
         """
-        return "".join([self.src_id2label[int(x)] for x in hyp['yseq'][1:]])
+        return "".join([self.vocab.id2label[int(x)] for x in hyp['yseq'][1:]])
 
     def greedy_search(self, encoder_padded_outputs, args, beam_width=2, lm_rescoring=False, lm=None, lm_weight=0.1, c_weight=1, start_token=-1):
         """
@@ -265,7 +265,7 @@ class Decoder(nn.Module):
                     else:
                         unended_hyps.append(hyp)
                 hyps = unended_hyps
-
+                
                 if len(hyps) == 0:
                     # decoding process is finished
                     break
