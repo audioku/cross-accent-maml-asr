@@ -27,7 +27,7 @@ def decode_greedy_search(decoder, vocab, encoder_padded_outputs, encoder_input_l
         ys = ys.cuda()
 
     decoded_words = []
-    for t in range(args.tgt_max_len):
+    for t in range(args.tgt_max_len - 1):
         pred_list, *_ = decoder(ys, encoder_padded_outputs, encoder_input_lengths) # B x T x V
         _, next_word = torch.max(pred_list[:, -1], dim=1)
         decoded_words.append([vocab.EOS_TOKEN if ni.item() == vocab.EOS_ID else vocab.id2label[ni.item()] for ni in next_word.view(-1)])
