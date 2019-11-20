@@ -234,14 +234,13 @@ class Decoder(nn.Module):
                     for j in range(beam_width):
                         new_hyp = {}
                         new_hyp["score"] = hyp["score"] + local_best_scores[0, j]
+                        
                         new_hyp["yseq"] = torch.ones(1, (1+ys.size(1))).type_as(encoder_output).long()
                         new_hyp["yseq"][:, :ys.size(1)] = hyp["yseq"].cpu()
-                        new_word = int(local_best_ids[0, j])
+                        new_hyp["yseq"][:, ys.size(1)] = int(local_best_ids[0, j]) # adding new word
 
-                        # convert target index to source index
-                        new_word = torch.LongTensor([new_word]).cuda()
-                        new_hyp["yseq"][:, ys.size(1)] = new_word # adding new word
                         hyps_best_kept.append(new_hyp)
+                        
                     hyps_best_kept = sorted(hyps_best_kept, key=lambda x:x["score"], reverse=True)[:beam_width]
                 
                 hyps = hyps_best_kept
