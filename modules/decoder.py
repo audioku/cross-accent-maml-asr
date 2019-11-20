@@ -239,7 +239,7 @@ class Decoder(nn.Module):
                         new_word = int(local_best_ids[0, j])
 
                         # convert target index to source index
-                        new_word = torch.LongTensor([self.vocab.id2label[new_word]]).cuda()
+                        new_word = torch.LongTensor([new_word]).cuda()
                         new_hyp["yseq"][:, ys.size(1)] = new_word # adding new word
                         hyps_best_kept.append(new_hyp)
                     hyps_best_kept = sorted(hyps_best_kept, key=lambda x:x["score"], reverse=True)[:beam_width]
@@ -249,12 +249,12 @@ class Decoder(nn.Module):
                 # add EOS_TOKEN
                 if i == max_len - 1:
                     for hyp in hyps:
-                        hyp["yseq"] = torch.cat([hyp["yseq"], torch.ones(1,1).fill_(self.args.EOS_ID).type_as(encoder_output).long()], dim=1)
+                        hyp["yseq"] = torch.cat([hyp["yseq"], torch.ones(1,1).fill_(self.vocab.EOS_ID).type_as(encoder_output).long()], dim=1)
 
                 # add hypothesis that have EOS_ID to ended_hyps list
                 unended_hyps = []
                 for hyp in hyps:
-                    if hyp["yseq"][0, -1] == self.args.EOS_ID:
+                    if hyp["yseq"][0, -1] == self.vocab.EOS_ID:
                         seq_str = "".join(self.vocab.id2label[char.item()] for char in hyp["yseq"][0]).replace(self.vocab.PAD_TOKEN,"").replace(self.vocab.SOS_TOKEN,"").replace(self.vocab.EOS_TOKEN,"")
                         seq_str = seq_str.replace("  ", " ")
                         num_words = len(seq_str.split())
