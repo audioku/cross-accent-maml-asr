@@ -245,7 +245,6 @@ class Decoder(nn.Module):
                         new_hyp["yseq"][:, ys.size(1)] = int(local_best_ids[0, j]) # adding new word
 
                         hyps_best_kept.append(new_hyp)
-                        
                     hyps_best_kept = sorted(hyps_best_kept, key=lambda x:x["score"], reverse=True)[:beam_width]
                 
                 hyps = hyps_best_kept
