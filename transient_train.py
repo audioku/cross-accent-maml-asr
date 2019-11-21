@@ -12,7 +12,7 @@ import random
 
 from torchsummary import summary
 from torch.autograd import Variable
-from trainer.asr.meta_trainer import TransientTrainer
+from trainer.asr.transient_trainer import TransientTrainer
 from utils.data import Vocab
 from utils.data_loader import SpectrogramDataset, LogFBankDataset, AudioDataLoader, BucketingSampler
 from utils.functions import load_meta_model, init_transformer_model, init_optimizer, compute_num_params, generate_labels

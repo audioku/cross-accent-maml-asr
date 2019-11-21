@@ -249,7 +249,7 @@ class MetaTrainer():
                 # Record performance
                 last_sum_cer.append(total_cer)
                 last_sum_char.append(total_char)
-                last_sum_loss.append(total_loss)
+                last_sum_loss.append(total_loss/len(train_data_list))
 
                 # Record execution time
                 end_time = time.time()

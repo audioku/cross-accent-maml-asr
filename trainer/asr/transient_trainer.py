@@ -165,11 +165,8 @@ class TransientTrainer():
                     model.zero_copy_grad() # initialize copy_grad with 0
 
                 # Retrieve target validation
-                _, val_data = train_data_buffer[-1]
+                _, val_data = train_data_buffer[-1][-1]
                 val_inputs, val_input_sizes, val_percentages, val_targets, val_target_sizes = val_data
-                if args.cuda:
-                    val_inputs = val_inputs.cuda()
-                    val_targets = val_targets.cuda()
                     
                 # Pop buffer for all manifest first
                 # so we can maintain the same number in the buffer list if exception occur
@@ -208,12 +205,20 @@ class TransientTrainer():
                     if args.clip:
                         torch.nn.utils.clip_grad_norm_(model.parameters(), args.max_norm)
                     inner_opt.step()
-                    
+
+                    # Move validation to cuda
+                    if args.cuda:
+                        val_cuda_inputs = val_inputs.cuda()
+                        val_cuda_targets = val_targets.cuda()
+
                     # Meta Validation 
-                    val_loss, val_cer, val_num_char = self.forward_one_batch(model, vocab, val_inputs, val_targets, val_percentages, val_input_sizes, val_target_sizes, smoothing, loss_type)
+                    val_loss, val_cer, val_num_char = self.forward_one_batch(model, vocab, val_cuda_inputs, val_cuda_targets, val_percentages, val_input_sizes, val_target_sizes, smoothing, loss_type)
 
                     # batch_loss += val_loss
                     total_loss += val_loss.item()
+                    
+                    # Delete unused references
+                    del val_cuda_inputs, val_cuda_targets
                     
                     # outer loop optimization
                     if is_copy_grad:
@@ -251,7 +256,7 @@ class TransientTrainer():
                 # Record performance
                 last_sum_cer.append(total_cer)
                 last_sum_char.append(total_char)
-                last_sum_loss.append(total_loss)
+                last_sum_loss.append(total_loss/len(train_data_list))
 
                 # Record execution time
                 end_time = time.time()
@@ -362,6 +367,7 @@ class TransientTrainer():
 
                 tr_inputs, tr_input_sizes, tr_percentages, tr_targets, tr_target_sizes = None, None, None, None, None
                 val_inputs, val_input_sizes, val_percentages, val_targets, val_target_sizes = None, None, None, None, None       
+                val_cuda_inputs, val_cuda_targets = None, None
                 tr_loss, val_loss = None, None
                 weights_original = None
                 batch_loss = 0
