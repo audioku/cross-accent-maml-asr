@@ -122,7 +122,12 @@ class Decoder(nn.Module):
         output:
             list of hypothesis (string)>
         """
-        return "".join([self.vocab.id2label[int(x)] for x in hyp['yseq'][1:]])
+        string = "".join([self.vocab.id2label[int(x)] for x in hyp['yseq'][1:]])
+        for token in self.vocab.special_token_list:
+            string = string.replace(token,"")
+        string = string.replace("▁"," ")
+        return string
+
 
     def greedy_search(self, encoder_padded_outputs, args, beam_width=2, lm_rescoring=False, lm=None, lm_weight=0.1, c_weight=1, start_token=-1):
         """

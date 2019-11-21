@@ -128,6 +128,7 @@ class Transformer(nn.Module):
             batch_strs_nbest_hyps: list of nbest str
             batch_strs_gold: list of gold str
         """
+        # TODO: Beam search only works with batch size of 1, need to be fix
         if self.feat_extractor == 'emb_cnn' or self.feat_extractor == 'vgg_cnn' or self.feat_extractor == 'large_cnn':
             padded_input = self.conv(padded_input)
 
@@ -144,8 +145,7 @@ class Transformer(nn.Module):
         if beam_search:
             ids_hyps, strs_hyps = self.decoder.beam_search(encoder_padded_outputs, args, beam_width=args.beam_width, nbest=args.beam_nbest, c_weight=c_weight, start_token=start_token)
 #             ids_hyps, strs_hyps = decode_beam_search(self.decoder, self.vocab, encoder_padded_outputs, input_lengths, args, beam_width=beam_width, beam_nbest=beam_nbest, c_weight=1, start_token=start_token)
-            print('len(strs_hyps), sizes[0]', len(strs_hyps), sizes[0], flush=True)
-            if len(strs_hyps) != sizes[0]:
+            if len(strs_hyps[0].strip()) == 0:
                 print(">>>>>>> switch to greedy")
                 strs_hyps = self.decoder.greedy_search(encoder_padded_outputs, args, start_token=start_token)
 #                 strs_hyps = decode_greedy_search(self.decoder, self.vocab, encoder_padded_outputs, input_lengths, args, c_weight=1, start_token=start_token)
