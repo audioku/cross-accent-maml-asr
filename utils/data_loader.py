@@ -237,6 +237,10 @@ class SpectrogramDataset(Dataset, SpectrogramParser):
             # uniform distributions over all data
             for i, ids_list in enumerate(self.ids_list):
                 self.proba[i] = np.full(len(ids_list), 1/len(ids_list))
+                
+                # DEBUG MESSAGE
+                # print('i, len(ids_list)', i, len(ids_list))
+                # print('proba 0 -1 ', self.proba[i][0], self.proba[i][-1])
         
         # if self.input_type == "bpe":
         #     self.bpeemb_list = []
