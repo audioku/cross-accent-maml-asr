@@ -76,7 +76,7 @@ class JointTrainer():
         for param_group in optimizer.param_groups:
             return param_group['lr']
 
-    def train(self, model, vocab, train_data_list, valid_loader_list, loss_type, start_it, num_it, args, evaluate_every=1000, window_size=100, last_summary_every=10, last_metrics=None, early_stop=10, cpu_state_dict=False, is_copy_grad=False):
+    def train(self, model, vocab, train_data_list, valid_loader_list, loss_type, start_it, num_it, args, evaluate_every=1000, window_size=100, last_summary_every=1000, last_metrics=None, early_stop=10, cpu_state_dict=False, is_copy_grad=False):
         """
         Training
         args:
@@ -244,7 +244,7 @@ class JointTrainer():
                                 total_valid_char += num_char
 
                                 total_valid_loss += loss.item()
-                                valid_pbar.set_description("VALID SET {} LOSS:{:.4f} CER:{:.2f}%".format(ind,
+                                valid_pbar.set_description("(Iteration {}) VALID SET {} LOSS:{:.4f} CER:{:.2f}%".format((it+1), ind,
                                     total_valid_loss/(i+1), total_valid_cer*100/total_valid_char))
 
                             final_valid_loss = total_valid_loss/(len(valid_loader))
@@ -252,8 +252,8 @@ class JointTrainer():
 
                             final_valid_losses.append(final_valid_loss)
                             final_valid_cers.append(final_valid_cer)
-                            print("VALID SET {} LOSS:{:.4f} CER:{:.2f}%".format(ind, final_valid_loss, final_valid_cer))
-                            logging.info("VALID SET {} LOSS:{:.4f} CER:{:.2f}%".format(ind, final_valid_loss, final_valid_cer))
+                            print("(Iteration {}) VALID SET {} LOSS:{:.4f} CER:{:.2f}%".format((it+1), ind, final_valid_loss, final_valid_cer))
+                            logging.info("(Iteration {}) VALID SET {} LOSS:{:.4f} CER:{:.2f}%".format((it+1), ind, final_valid_loss, final_valid_cer))
 
                     metrics = {}
                     avg_valid_loss = sum(final_valid_losses) / len(final_valid_losses)
@@ -265,8 +265,8 @@ class JointTrainer():
                     metrics["history"] = history
                     history.append(metrics)
 
-                    print("AVG VALID LOSS:{:.4f} AVG CER:{:.2f}%".format(sum(final_valid_losses) / len(final_valid_losses), sum(final_valid_cers) / len(final_valid_cers)))
-                    logging.info("AVG VALID LOSS:{:.4f} AVG CER:{:.2f}%".format(sum(final_valid_losses) / len(final_valid_losses), sum(final_valid_cers) / len(final_valid_cers)))
+                    print("(Iteration {}) AVG VALID LOSS:{:.4f} AVG CER:{:.2f}%".format((it+1), sum(final_valid_losses) / len(final_valid_losses), sum(final_valid_cers) / len(final_valid_cers)))
+                    logging.info("(Iteration {}) AVG VALID LOSS:{:.4f} AVG CER:{:.2f}%".format((it+1), sum(final_valid_losses) / len(final_valid_losses), sum(final_valid_cers) / len(final_valid_cers)))
 
                     if (it+1) % args.save_every == 0:
                         save_joint_model(model, vocab, (it+1), opt, metrics, args, best_model=False)
