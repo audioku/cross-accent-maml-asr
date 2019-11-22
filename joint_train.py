@@ -15,7 +15,7 @@ from torch.autograd import Variable
 from trainer.asr.joint_trainer import JointTrainer
 from utils.data import Vocab
 from utils.data_loader import SpectrogramDataset, LogFBankDataset, AudioDataLoader, BucketingSampler
-from utils.functions import save_model, load_model, init_transformer_model, init_optimizer, compute_num_params, generate_labels
+from utils.functions import load_joint_model, init_transformer_model, init_optimizer, compute_num_params, generate_labels
 
 parser = argparse.ArgumentParser(description='Transformer ASR meta training')
 parser.add_argument('--model', default='TRFS', type=str, help="")
@@ -182,7 +182,7 @@ if __name__ == '__main__':
     loaded_args = None
     if args.continue_from != "":
         logging.info("Continue from checkpoint:" + args.continue_from)
-        model, vocab, opt, epoch, metrics, loaded_args = load_model(args.continue_from)
+        model, vocab, opt, epoch, metrics, loaded_args = load_joint_model(args.continue_from)
         start_epoch = (epoch)  # index starts from zero
         verbose = args.verbose
     else:
