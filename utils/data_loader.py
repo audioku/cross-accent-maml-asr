@@ -178,7 +178,7 @@ class LogFBankDataset(Dataset):
         return self.max_size
 
 class SpectrogramDataset(Dataset, SpectrogramParser):
-    def __init__(self, vocab, args, audio_conf, manifest_filepath_list, normalize=False, augment=False, input_type="char", is_train=False):
+    def __init__(self, vocab, args, audio_conf, manifest_filepath_list, normalize=False, augment=False, input_type="char", is_train=False, partitions=None):
         """
         Dataset that loads tensors via a csv containing file paths to audio files and transcripts separated by
         a comma. Each new line is a different sample. Example below:
@@ -189,13 +189,15 @@ class SpectrogramDataset(Dataset, SpectrogramParser):
         :param labels: String containing all the possible characters to map to
         :param normalize: Apply standard mean and deviation normalization to audio tensor
         :param augment(default False):  Apply random tempo and gain perturbations
+        :param partitions(default None):  Partition size of each manifest file
         """
         self.max_size = 0
         self.ids_list = []
         self.is_train = is_train
         self.args = args
         self.vocab = vocab
-
+        self.proba = [None for i in range(len(manifest_filepath_list))]
+        
         for i in range(len(manifest_filepath_list)):
             manifest_filepath = manifest_filepath_list[i]
             with open(manifest_filepath) as f:
@@ -219,6 +221,27 @@ class SpectrogramDataset(Dataset, SpectrogramParser):
         self.input_type = input_type
         self.manifest_filepath_list = manifest_filepath_list
 
+        if partitions is not None:
+            # Generate uniform distributions as defined in partitions
+            for i, ids_list in enumerate(self.ids_list):
+                self.proba[i] = np.zeros(len(ids_list))
+                part_len = int(len(ids_list) * partitions[i])
+                part_len = 1 if part_len == 0 else part_len
+                self.proba[i][:part_len] = 1/part_len
+                
+                # DEBUG MESSAGE
+                # print('i, len(ids_list)', i, len(ids_list))
+                # print('part_len, partitions', part_len, partitions[i])
+                # print('proba 0 -1 ', self.proba[i][0], self.proba[i][-1])
+        else:
+            # uniform distributions over all data
+            for i, ids_list in enumerate(self.ids_list):
+                self.proba[i] = np.full(len(ids_list), 1/len(ids_list))
+                
+                # DEBUG MESSAGE
+                # print('i, len(ids_list)', i, len(ids_list))
+                # print('proba 0 -1 ', self.proba[i][0], self.proba[i][-1])
+        
         # if self.input_type == "bpe":
         #     self.bpeemb_list = []
         #     for i in range(len(self.lang_list)):
@@ -248,7 +271,7 @@ class SpectrogramDataset(Dataset, SpectrogramParser):
             return len(p)
 
         ids = self.ids_list[manifest_id]
-        shuffled_indices = np.random.choice(np.arange(0, len(ids)), k_train + k_val, replace=True)
+        shuffled_indices = np.random.choice(np.arange(0, len(ids)), k_train + k_val, p=self.proba[manifest_id], replace=True)
         tr_ids = shuffled_indices[:k_train]
         val_ids = shuffled_indices[k_train:k_train+k_val]
         

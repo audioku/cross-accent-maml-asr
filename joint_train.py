@@ -25,6 +25,8 @@ parser.add_argument('--train-manifest-list', nargs='+', type=str)
 parser.add_argument('--valid-manifest-list', nargs='+', type=str)
 parser.add_argument('--test-manifest-list', nargs='+', type=str)
 
+parser.add_argument('--train-partition-list', nargs='+', type=float, default=None)
+
 parser.add_argument('--sample-rate', default=22050, type=int, help='Sample rate')
 parser.add_argument('--k-train', default=20, type=int, help='Batch size for training')
 
@@ -162,7 +164,7 @@ if __name__ == '__main__':
     train_data_list = []
     for i in range(len(args.train_manifest_list)):
         if args.feat == "spectrogram":
-            train_data = SpectrogramDataset(vocab, args, audio_conf, manifest_filepath_list=args.train_manifest_list, normalize=True, augment=args.augment, input_type=args.input_type, is_train=True)
+            train_data = SpectrogramDataset(vocab, args, audio_conf, manifest_filepath_list=args.train_manifest_list, normalize=True, augment=args.augment, input_type=args.input_type, is_train=True, partitions=args.train_partition_list)
         elif args.feat == "logfbank":
             train_data = LogFBankDataset(vocab, args, audio_conf, manifest_filepath_list=args.train_manifest_list, normalize=True, augment=args.augment, input_type=args.input_type, is_train=True)
         train_data_list.append(train_data)
