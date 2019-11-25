@@ -7,10 +7,9 @@ import math
 import os
 
 from .common_layers import FactorizedMultiHeadAttention, PositionalEncoding, PositionwiseFeedForward, FactorizedPositionwiseFeedForward, get_subsequent_mask, get_non_pad_mask, get_attn_key_pad_mask, get_attn_pad_mask, pad_list, pad_list_with_mask
-
 from torch.autograd import Variable
-# from utils import constant
 from utils.metrics import calculate_metrics
+from utils.lm import calculate_lm_score
 
 class Decoder(nn.Module):
     """
@@ -258,10 +257,16 @@ class Decoder(nn.Module):
                 unended_hyps = []
                 for hyp in hyps:
                     if hyp["yseq"][0, -1] == self.vocab.EOS_ID:
-                        seq_str = "".join(self.vocab.id2label[char.item()] for char in hyp["yseq"][0]).replace(self.vocab.PAD_TOKEN,"").replace(self.vocab.SOS_TOKEN,"").replace(self.vocab.EOS_TOKEN,"")
-                        seq_str = seq_str.replace("  ", " ")
-                        num_words = len(seq_str.split())
-                        hyp["final_score"] = hyp["score"] + math.sqrt(num_words) * c_weight
+                        if lm_rescoring:
+                            hyp["lm_score"], hyp["num_words"], oov_token = calculate_lm_score(hyp["yseq"], lm, self.vocab)
+                            num_words = hyp["num_words"]
+                            hyp["lm_score"] -= oov_token * 2
+                            hyp["final_score"] = hyp["score"] + lm_weight * hyp["lm_score"] + math.sqrt(num_words) * c_weight
+                        else:
+                            seq_str = "".join(self.vocab.id2label[char.item()] for char in hyp["yseq"][0]).replace(self.vocab.PAD_TOKEN,"").replace(self.vocab.SOS_TOKEN,"").replace(self.vocab.EOS_TOKEN,"")
+                            seq_str = seq_str.replace("  ", " ")
+                            num_words = len(seq_str.split())
+                            hyp["final_score"] = hyp["score"] + math.sqrt(num_words) * c_weight
                         
                         ended_hyps.append(hyp)
                         
@@ -282,7 +287,6 @@ class Decoder(nn.Module):
                 hyp_strs = self.post_process_hyp(hyp)
                 batch_ids_nbest_hyps.append(hyp["yseq"])
                 batch_strs_nbest_hyps.append(hyp_strs)
-                # print(hyp["yseq"], hyp_strs)
         return batch_ids_nbest_hyps, batch_strs_nbest_hyps
 
 class DecoderLayer(nn.Module):
