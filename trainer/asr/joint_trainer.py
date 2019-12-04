@@ -76,7 +76,7 @@ class JointTrainer():
         for param_group in optimizer.param_groups:
             return param_group['lr']
 
-    def train(self, model, vocab, train_data_list, valid_loader_list, loss_type, start_it, num_it, args, evaluate_every=1000, window_size=100, last_summary_every=1000, last_metrics=None, early_stop=10, cpu_state_dict=False, is_copy_grad=False):
+    def train(self, model, vocab, train_data_list, valid_loader_list, loss_type, start_it, num_it, args, evaluate_every=1000, window_size=100, last_summary_every=1000, last_metrics=None, early_stop=10, cpu_state_dict=False, is_copy_grad=False, opt_name="adam"):
         """
         Training
         args:
@@ -102,7 +102,12 @@ class JointTrainer():
         model.train()
 
         # define the optimizer
-        opt = torch.optim.Adam(model.parameters(), lr=args.lr)
+        if opt_name == "adam":
+            opt = torch.optim.Adam(model.parameters(), lr=args.lr)
+        elif opt_name == "sgd":
+            opt = torch.optim.SGD(model.parameters(), lr=args.lr)
+        else:
+            opt = None
         # opt = NoamOpt(args.dim_model, args.k_lr, args.warmup, torch.optim.Adam(model.parameters(), betas=(0.9, 0.98), eps=1e-9), min_lr=args.min_lr)
 
         last_sum_loss = deque(maxlen=window_size)

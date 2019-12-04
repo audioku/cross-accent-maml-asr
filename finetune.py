@@ -109,6 +109,7 @@ parser.add_argument('--factorize', action='store_true', help='factorize')
 # Training config
 parser.add_argument('--copy-grad', action='store_true', help="copy grad for MAML") # Useless
 parser.add_argument('--cpu-state-dict', action='store_true', help='store state dict in cpu')
+parser.add_argument('--opt_name', type=str, default='adam', help='adam or sgd')
 
 # Finetune
 parser.add_argument('--finetune', action='store_true', help="") 
@@ -129,6 +130,7 @@ if __name__ == '__main__':
     print("VALID MANIFEST: ", args.valid_manifest_list)
     print("TEST MANIFEST: ", args.test_manifest_list)
     print("INPUT TYPE: ", args.input_type)
+    print("OPT NAME: ", args.opt_name)
     print("="*50)
 
     if not os.path.exists("./log"): os.mkdir("./log")
@@ -195,4 +197,4 @@ if __name__ == '__main__':
     print("Parameters: {}(trainable), {}(non-trainable)".format(compute_num_params(model)[0], compute_num_params(model)[1]))
 
     trainer = JointTrainer()
-    trainer.train(model, vocab, train_data_list, valid_loader_list, loss_type, start_epoch, num_epochs, args, evaluate_every=args.evaluate_every, last_metrics=metrics, early_stop=args.early_stop, cpu_state_dict=args.cpu_state_dict, is_copy_grad=args.copy_grad)
+    trainer.train(model, vocab, train_data_list, valid_loader_list, loss_type, start_epoch, num_epochs, args, evaluate_every=args.evaluate_every, last_metrics=metrics, early_stop=args.early_stop, cpu_state_dict=args.cpu_state_dict, is_copy_grad=args.copy_grad, opt_name=args.opt_name)

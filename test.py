@@ -14,6 +14,7 @@ from utils.data_loader import SpectrogramDataset, LogFBankDataset, AudioDataLoad
 from utils.optimizer import NoamOpt
 from utils.metrics import calculate_metrics, calculate_cer, calculate_wer, calculate_cer_en_zh
 from utils.functions import load_meta_model, load_joint_model, post_process, compute_num_params
+from utils.lm import LM
 
 parser = argparse.ArgumentParser(description='Transformer ASR training')
 parser.add_argument('--model', default='TRFS', type=str, help="")
@@ -108,7 +109,7 @@ torch.cuda.manual_seed_all(123456)
 args = parser.parse_args()
 USE_CUDA = args.cuda
 
-def evaluate(model, vocab, test_loader, args, start_token=-1):
+def evaluate(model, vocab, test_loader, args, lm=None, start_token=-1):
     """
     Evaluation
     args:
@@ -133,7 +134,7 @@ def evaluate(model, vocab, test_loader, args, start_token=-1):
 
             start_time = time.time()
             batch_ids_hyps, batch_strs_hyps, batch_strs_gold = model.evaluate(
-                src, src_lengths, trg, args, beam_search=args.beam_search, beam_width=args.beam_width, beam_nbest=args.beam_nbest, c_weight=args.c_weight, start_token=start_token, verbose=args.verbose)
+                src, src_lengths, trg, args, lm_rescoring=args.lm_rescoring, lm=lm, lm_weight=args.lm_weight, beam_search=args.beam_search, beam_width=args.beam_width, beam_nbest=args.beam_nbest, c_weight=args.c_weight, start_token=start_token, verbose=args.verbose)
 
             for x in range(len(batch_strs_gold)):
                 hyp = post_process(batch_strs_hyps[x], vocab.special_token_list)
@@ -205,4 +206,8 @@ if __name__ == '__main__':
     if not args.cuda:
         model = model.cpu()
 
-    evaluate(model, vocab, test_loader, args, start_token=vocab.SOS_ID)
+    lm = None
+    if args.lm_rescoring:
+        lm = LM(args.lm_path, args)
+
+    evaluate(model, vocab, test_loader, args, lm=lm, start_token=vocab.SOS_ID)
