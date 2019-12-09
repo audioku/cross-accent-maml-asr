@@ -1,8 +1,9 @@
+import os, sys
 import librosa
 import json
 import math
 import numpy as np
-import os
+import pandas as pd
 import scipy.signal
 import torch
 import random
@@ -114,10 +115,7 @@ class LogFBankDataset(Dataset):
         self.ids_list = []
         for i in range(len(manifest_filepath_list)):
             manifest_filepath = manifest_filepath_list[i]
-            with open(manifest_filepath) as f:
-                ids = f.readlines()
-
-            ids = [x.strip().split(',') for x in ids]
+            ids = pd.read_csv(manifest_filepath, header=None).values.tolist()
             self.ids_list.append(ids)
             self.max_size = max(len(ids), self.max_size)
 
@@ -162,8 +160,11 @@ class LogFBankDataset(Dataset):
         return fbank_feat
 
     def parse_transcript(self, transcript_path):
-        with open(transcript_path, 'r', encoding='utf8') as transcript_file:
-            transcript = " " + transcript_file.read().replace('\n', '').lower()
+        if transcript_path[-4:] == '.txt':
+            with open(transcript_path, 'r', encoding='utf8') as transcript_file:
+                transcript = " " + transcript_file.read().replace('\n', '').lower()
+        else:
+            transcript = transcript_path.replace('\n', '').lower()
 
         # if self.input_type == "bpe":
         #     bpes = self.bpeemb_list[lang_id].encode(transcript)
@@ -200,10 +201,7 @@ class SpectrogramDataset(Dataset, SpectrogramParser):
         
         for i in range(len(manifest_filepath_list)):
             manifest_filepath = manifest_filepath_list[i]
-            with open(manifest_filepath) as f:
-                ids = f.readlines()
-
-            ids = [x.strip().split(',') for x in ids]
+            ids = pd.read_csv(manifest_filepath, header=None).values.tolist()
             self.ids_list.append(ids)
             self.max_size = max(len(ids), self.max_size)
 
@@ -228,19 +226,10 @@ class SpectrogramDataset(Dataset, SpectrogramParser):
                 part_len = int(len(ids_list) * partitions[i])
                 part_len = 1 if part_len == 0 else part_len
                 self.proba[i][:part_len] = 1/part_len
-                
-                # DEBUG MESSAGE
-                # print('i, len(ids_list)', i, len(ids_list))
-                # print('part_len, partitions', part_len, partitions[i])
-                # print('proba 0 -1 ', self.proba[i][0], self.proba[i][-1])
         else:
             # uniform distributions over all data
             for i, ids_list in enumerate(self.ids_list):
                 self.proba[i] = np.full(len(ids_list), 1/len(ids_list))
-                
-                # DEBUG MESSAGE
-                # print('i, len(ids_list)', i, len(ids_list))
-                # print('proba 0 -1 ', self.proba[i][0], self.proba[i][-1])
         
         # if self.input_type == "bpe":
         #     self.bpeemb_list = []
@@ -282,18 +271,18 @@ class SpectrogramDataset(Dataset, SpectrogramParser):
             sample = ids[tr_ids[i]]
             audio_path, transcript_path = sample[0], sample[1]
             spect = self.parse_audio(audio_path)[:,:self.args.src_max_len]
-            transcript = self.parse_transcript(transcript_path)
-
+            transcript = self.parse_transcript(transcript_path, True)
+            
             tr_spect.append(spect)
             tr_transcript.append(transcript)
 #             print(">>>", transcript)
-        
+
         for i in range(len(val_ids)):
             sample = ids[val_ids[i]]
             audio_path, transcript_path = sample[0], sample[1]
             spect = self.parse_audio(audio_path)[:,:self.args.src_max_len]
             transcript = self.parse_transcript(transcript_path)
-
+            
             val_spect.append(spect)
             val_transcript.append(transcript)
 
@@ -362,10 +351,14 @@ class SpectrogramDataset(Dataset, SpectrogramParser):
 
     def parse_transcript(self, transcript_path):
         if self.input_type == "char":
-            with open(transcript_path, 'r', encoding='utf8') as transcript_file:
-                cur_transcript = " " + transcript_file.read().replace('\n', '').lower()
+            if transcript_path[-4:] == '.txt':
+                with open(transcript_path, 'r', encoding='utf8') as transcript_file:
+                    cur_transcript = " " + transcript_file.read().replace('\n', '').lower()
+            else:
+                cur_transcript = transcript_path.replace('\n', '').lower()
         elif self.input_type == "ipa":
             cur_transcript = np.load(transcript_path)
+    
         # elif self.input_type == "bpe":
         #     with open(transcript_path, 'r', encoding='utf8') as transcript_file:
         #         cur_transcript = " " + transcript_file.read().replace('\n', '').lower()
@@ -446,83 +439,6 @@ class CPT2LogFBankDataset(Dataset):
     def __len__(self):
         return self.max_size
 
-class CPT2SpectrogramDataset(Dataset, SpectrogramParser):
-    def __init__(self, tokenizer, args, audio_conf, manifest_filepath_list, normalize=False, augment=False, is_train=False):
-        """
-        Dataset that loads tensors via a csv containing file paths to audio files and transcripts separated by
-        a comma. Each new line is a different sample. Example below:
-        /path/to/audio.wav,/path/to/audio.txt
-        ...
-        :param audio_conf: Dictionary containing the sample rate, window and the window length/stride in seconds
-        :param manifest_filepath: Path to manifest csv as describe above
-        :param labels: String containing all the possible characters to map to
-        :param normalize: Apply standard mean and deviation normalization to audio tensor
-        :param augment(default False):  Apply random tempo and gain perturbations
-        """
-        self.max_size = 0
-        self.ids_list = []
-        self.is_train = is_train
-        self.args = args
-        self.tokenizer = tokenizer
-
-        for i in range(len(manifest_filepath_list)):
-            manifest_filepath = manifest_filepath_list[i]
-            with open(manifest_filepath) as f:
-                ids = f.readlines()
-
-            ids = [x.strip().split(',') for x in ids]
-            self.ids_list.append(ids)
-            self.max_size = max(len(ids), self.max_size)
-
-        self.max_size = self.max_size * len(manifest_filepath_list)
-        if self.is_train:
-            if len(manifest_filepath_list) == 1:
-                self.max_size = self.max_size
-            else:
-                self.max_size = 30000
-        else:
-            self.max_size = self.max_size
-        print("max_size:", self.max_size)
-
-        self.manifest_filepath_list = manifest_filepath_list
-
-        super(CPT2SpectrogramDataset, self).__init__(
-            audio_conf, normalize, augment)
-
-    def __getitem__(self, index):
-        if self.is_train:
-            manifest_id = index % len(self.manifest_filepath_list)
-            sample_id = index // len(self.manifest_filepath_list)
-            ids = self.ids_list[manifest_id]
-            sample = ids[sample_id % len(ids)]
-
-            audio_path, transcript_path = sample[0], sample[1]
-            spect = self.parse_audio(audio_path)[:,:self.args.src_max_len]
-            transcript = self.parse_transcript(transcript_path)
-        else: # valid or test
-            ids = self.ids_list[0]
-            sample = ids[index % len(ids)]
- 
-            audio_path, transcript_path = sample[0], sample[1]
-            spect = self.parse_audio(audio_path)[:,:self.args.src_max_len]
-            transcript = self.parse_transcript(transcript_path)
-        return spect, transcript
-
-    def parse_transcript(self, transcript_path):
-        with open(transcript_path, 'r', encoding='utf8') as transcript_file:
-            cur_transcript = " " + transcript_file.read().replace('\n', '').lower()
-        bpes = self.tokenizer.encode(cur_transcript)
-        
-#         # DEBUG
-#         print('cur_transcript', cur_transcript)
-#         print('bpes', bpes)
-#         print('dec_transcript', self.tokenizer.decode(bpes))
-
-        return bpes
-
-    def __len__(self):
-        return self.max_size
-
 class NoiseInjection(object):
     def __init__(self,
                  path=None,
@@ -598,48 +514,43 @@ class AudioDataLoader(DataLoader):
             # print(target_transcripts)
             return inputs, targets, input_percentages, input_sizes, target_sizes
 
-        self.collate_fn = _collate_fn
-        
-class SamcahAudioDataLoader(DataLoader):
-    def __init__(self, pad_token_id, *args, **kwargs):
-        super(SamcahAudioDataLoader, self).__init__(*args, **kwargs)
-        self.pad_token_id = pad_token_id
-    
-        def _collate_fn(batch):
-            # Batch is a tuple of (audio_features (torch.Tensor)[dim x seq_len], target_text (list))
-            def src_len(p):
-                return p[0].size(1)
+#         # More pythonic way to do it?
+#         def _collate_fn(batch):
+#             # Batch is a tuple of (audio_features (torch.Tensor)[dim x seq_len], target_text (list))
+#             def src_len(p):
+#                 return p[0].size(1)
 
-            def trg_len(p):
-                return len(p[1])
+#             def trg_len(p):
+#                 return len(p[1])
             
-            # descending sorted
-            batch = sorted(batch, key=lambda sample: sample[0].size(1), reverse=True)
+#             # descending sorted
+#             batch = sorted(batch, key=lambda sample: sample[0].size(1), reverse=True)
             
-            seq_len = list(map(src_len, batch))
-            trg_len = list(map(trg_len, batch))
+#             seq_len = list(map(src_len, batch))
+#             trg_len = list(map(trg_len, batch))
             
-            max_seq_len = max(seq_len)
-            freq_size = batch[0][0].size(0)
-            max_trg_len = max(trg_len)
+#             max_seq_len = max(seq_len)
+#             freq_size = batch[0][0].size(0)
+#             max_trg_len = max(trg_len)
 
-            inputs = torch.zeros(len(batch), 1, freq_size, max_seq_len)
-            input_sizes = torch.IntTensor(seq_len)
-            input_percentages = torch.FloatTensor(len(batch))
-            targets = torch.full((len(batch), max_trg_len), self.pad_token_id).long()
-            target_sizes = torch.IntTensor(trg_len)
+#             inputs = torch.zeros(len(batch), 1, freq_size, max_seq_len)
+#             input_sizes = torch.IntTensor(seq_len)
+#             input_percentages = torch.FloatTensor(len(batch))
+#             targets = torch.full((len(batch), max_trg_len), self.pad_token_id).long()
+#             target_sizes = torch.IntTensor(trg_len)
 
-            for x in range(len(batch)):
-                sample = batch[x]
-                input_data = sample[0]
-                target = sample[1]
-                inputs[x,0,:,:seq_len[x]] = input_data
-                input_percentages[x] = seq_len[x] / max_seq_len
-                targets[x][:trg_len[x]] = torch.IntTensor(target)
+#             for x in range(len(batch)):
+#                 sample = batch[x]
+#                 input_data = sample[0]
+#                 target = sample[1]
+#                 inputs[x,0,:,:seq_len[x]] = input_data
+#                 input_percentages[x] = seq_len[x] / max_seq_len
+#                 targets[x][:trg_len[x]] = torch.IntTensor(target)
 
-            return inputs, targets, input_percentages, input_sizes, target_sizes
+#             return inputs, targets, input_percentages, input_sizes, target_sizes
         
         self.collate_fn = _collate_fn
+        
     
 class BucketingSampler(Sampler):
     def __init__(self, data_source, batch_size=1):
