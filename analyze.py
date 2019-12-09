@@ -14,7 +14,7 @@ from torchsummary import summary
 from torch.autograd import Variable
 from trainer.asr.analyzer import Analyzer
 from utils.data import Vocab
-from utils.data_loader import SpectrogramDataset, LogFBankDataset, SamcahAudioDataLoader, AudioDataLoader, BucketingSampler
+from utils.data_loader import SpectrogramDataset, LogFBankDataset, AudioDataLoader, BucketingSampler
 from utils.functions import save_model, load_model, init_transformer_model, init_optimizer, compute_num_params, generate_labels
 
 parser = argparse.ArgumentParser(description='Transformer ASR meta training')
@@ -156,7 +156,7 @@ if __name__ == '__main__':
             train_data = SpectrogramDataset(vocab, args, audio_conf, manifest_filepath_list=[args.train_manifest_list[i]], normalize=True, augment=args.augment, input_type=args.input_type)
         elif args.feat == "logfbank":
             train_data = LogFBankDataset(vocab, args, audio_conf, manifest_filepath_list=[args.train_manifest_list[i]], normalize=True, augment=False, input_type=args.input_type)
-        train_loader = SamcahAudioDataLoader(pad_token_id=0, dataset=train_data, num_workers=args.num_workers, batch_size=args.batch_size)
+        train_loader = AudioDataLoader(pad_token_id=0, dataset=train_data, num_workers=args.num_workers, batch_size=args.batch_size)
         train_loader_list.append(train_loader)
     
     for i in range(len(args.valid_manifest_list)):
@@ -164,7 +164,7 @@ if __name__ == '__main__':
             valid_data = SpectrogramDataset(vocab, args, audio_conf, manifest_filepath_list=[args.valid_manifest_list[i]], normalize=True, augment=args.augment, input_type=args.input_type)
         elif args.feat == "logfbank":
             valid_data = LogFBankDataset(vocab, args, audio_conf, manifest_filepath_list=[args.valid_manifest_list[i]], normalize=True, augment=False, input_type=args.input_type)
-        valid_loader = SamcahAudioDataLoader(pad_token_id=0, dataset=valid_data, num_workers=args.num_workers, batch_size=args.batch_size)
+        valid_loader = AudioDataLoader(pad_token_id=0, dataset=valid_data, num_workers=args.num_workers, batch_size=args.batch_size)
         valid_loader_list.append(valid_loader)
     
     for i in range(len(args.test_manifest_list)):
@@ -172,7 +172,7 @@ if __name__ == '__main__':
             test_data = SpectrogramDataset(vocab, args, audio_conf, manifest_filepath_list=[args.test_manifest_list[i]], normalize=True, augment=args.augment, input_type=args.input_type)
         elif args.feat == "logfbank":
             test_data = LogFBankDataset(vocab, args, audio_conf, manifest_filepath_list=[args.test_manifest_list[i]], normalize=True, augment=False, input_type=args.input_type)
-        test_loader = SamcahAudioDataLoader(pad_token_id=0, dataset=test_data, num_workers=args.num_workers, batch_size=args.batch_size)
+        test_loader = AudioDataLoader(pad_token_id=0, dataset=test_data, num_workers=args.num_workers, batch_size=args.batch_size)
         test_loader_list.append(test_loader)
 
     analyzer = Analyzer()
