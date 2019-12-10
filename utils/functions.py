@@ -9,9 +9,9 @@ import numpy as np
 # from models.asr.transformer_cpt2 import TransformerCPT2, Encoder, Decoder
 from models.asr.transformer import Transformer
 from transformers import BertModel
-from modules import CPT2LMHeadModel, Encoder, Decoder
+from modules import Encoder, Decoder
 from models.asr.transformer import Transformer
-from models.asr.transformer_cpt2 import TransformerCPT2
+#from models.asr.transformer_cpt2 import TransformerCPT2
 from utils.optimizer import NoamOpt, AnnealingOpt
 
 def generate_labels(labels, special_token_list):
