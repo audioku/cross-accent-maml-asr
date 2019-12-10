@@ -12,7 +12,7 @@ import random
 
 from torchsummary import summary
 from torch.autograd import Variable
-from trainer.asr.meta_trainer import MetaTrainer
+from trainer.asr.transient_trainer import TransientTrainer
 from utils.data import Vocab
 from utils.data_loader import SpectrogramDataset, LogFBankDataset, AudioDataLoader, BucketingSampler
 from utils.functions import load_meta_model, init_transformer_model, init_optimizer, compute_num_params, generate_labels
@@ -25,9 +25,13 @@ parser.add_argument('--train-manifest-list', nargs='+', type=str)
 parser.add_argument('--valid-manifest-list', nargs='+', type=str)
 parser.add_argument('--test-manifest-list', nargs='+', type=str)
 
+parser.add_argument('--train-partition-list', nargs='+', type=float, default=None)
+
 parser.add_argument('--sample-rate', default=22050, type=int, help='Sample rate')
 parser.add_argument('--k-train', default=20, type=int, help='Batch size for training')
 parser.add_argument('--k-valid', default=20, type=int, help='Batch size for eval')
+
+parser.add_argument('--num-meta-test', default=100, type=int, help='Number of batches to calculate meta-test loss')
 
 parser.add_argument('--num-workers', default=8, type=int, help='Number of workers used in data-loading')
 parser.add_argument('--labels-path', default='labels.json', help='Contains all characters for transcription')
@@ -157,20 +161,18 @@ if __name__ == '__main__':
     train_data_list = []
     for i in range(len(args.train_manifest_list)):
         if args.feat == "spectrogram":
-            train_data = SpectrogramDataset(vocab, args, audio_conf, manifest_filepath_list=args.train_manifest_list, normalize=True, augment=args.augment, input_type=args.input_type, is_train=True)
+            train_data = SpectrogramDataset(vocab, args, audio_conf, manifest_filepath_list=args.train_manifest_list, normalize=True, augment=args.augment, input_type=args.input_type, is_train=True, partitions=args.train_partition_list)
         elif args.feat == "logfbank":
             train_data = LogFBankDataset(vocab, args, audio_conf, manifest_filepath_list=args.train_manifest_list, normalize=True, augment=args.augment, input_type=args.input_type, is_train=True)
         train_data_list.append(train_data)
 
-    valid_loader_list, test_loader_list = [], []
+    valid_data_list = []
     for i in range(len(args.valid_manifest_list)):
         if args.feat == "spectrogram":
-            valid_data = SpectrogramDataset(vocab, args, audio_conf, manifest_filepath_list=[args.valid_manifest_list[i]], normalize=True, augment=args.augment, input_type=args.input_type)
+            valid_data = SpectrogramDataset(vocab, args, audio_conf, manifest_filepath_list=args.valid_manifest_list, normalize=True, augment=args.augment, input_type=args.input_type, is_train=True)
         elif args.feat == "logfbank":
-            valid_data = LogFBankDataset(vocab, args, audio_conf, manifest_filepath_list=[args.valid_manifest_list[i]], normalize=True, augment=False, input_type=args.input_type)
-        valid_sampler = BucketingSampler(valid_data, batch_size=args.k_train)
-        valid_loader = AudioDataLoader(pad_token_id=vocab.PAD_ID, dataset=valid_data, num_workers=args.num_workers)
-        valid_loader_list.append(valid_loader)
+            valid_data = LogFBankDataset(vocab, args, audio_conf, manifest_filepath_list=args.valid_manifest_list, normalize=True, augment=args.augment, input_type=args.input_type, is_train=True)
+        valid_data_list.append(valid_data)
 
     start_epoch = 0
     metrics = None
@@ -198,5 +200,5 @@ if __name__ == '__main__':
     print("Parameters: {}(trainable), {}(non-trainable)".format(compute_num_params(model)[0], compute_num_params(model)[1]))
     logging.info("Parameters: {}(trainable), {}(non-trainable)".format(compute_num_params(model)[0], compute_num_params(model)[1]))
 
-    trainer = MetaTrainer()
-    trainer.train(model, vocab, train_data_list, valid_loader_list, loss_type, start_epoch, num_epochs, args, inner_opt=inner_opt, outer_opt=outer_opt, evaluate_every=args.evaluate_every, last_metrics=metrics, early_stop=args.early_stop, cpu_state_dict=args.cpu_state_dict, is_copy_grad=args.copy_grad)
+    trainer = TransientTrainer()
+    trainer.train(model, vocab, train_data_list, valid_data_list, loss_type, start_epoch, num_epochs, args, inner_opt=inner_opt, outer_opt=outer_opt, evaluate_every=args.evaluate_every, last_metrics=metrics, early_stop=args.early_stop, cpu_state_dict=args.cpu_state_dict, is_copy_grad=args.copy_grad)
