@@ -76,7 +76,7 @@ class MetaTrainer():
         for param_group in optimizer.param_groups:
             return param_group['lr']
 
-    def train(self, model, vocab, train_data_list, valid_data_list, loss_type, start_it, num_it, num_valid_it, args, inner_opt=None, outer_opt=None, evaluate_every=1000, window_size=100, last_summary_every=1000, last_metrics=None, early_stop=10, cpu_state_dict=False, is_copy_grad=False):
+    def train(self, model, vocab, train_data_list, valid_data_list, loss_type, start_it, num_it, args, inner_opt=None, outer_opt=None, evaluate_every=1000, window_size=100, last_summary_every=1000, last_metrics=None, early_stop=10, cpu_state_dict=False, is_copy_grad=False):
         """
         Training
         args:
@@ -85,9 +85,10 @@ class MetaTrainer():
             valid_data_list: DataLoader object of the valid set
             start_it: start it (> 0 if you resume the process)
             num_it: last epoch
-            num_valid_it: number of batches for validation
             last_metrics: (if resume)
         """
+        num_valid_it = args.num_meta_test
+
         history = []
         best_valid_val = 1000000000
         smoothing = args.label_smoothing
@@ -275,7 +276,6 @@ class MetaTrainer():
                 if (it + 1) % evaluate_every == 0:
                     print("")
                     logging.info("VALID")
-                    model.eval()
 
                     # Define local variables
                     valid_data_buffer = [[] for manifest_id in range(len(valid_data_list))]
@@ -305,7 +305,7 @@ class MetaTrainer():
                         
                         # Parallelly fetch next batch data from all manifest
                         prefetch = threading.Thread(target=fetch_train_batch, 
-                                        args=([valid_data_list, k_train, k_valid, train_data_buffer]))
+                                        args=([valid_data_list, k_train, k_valid, valid_data_buffer]))
                         prefetch.start()
 
                         # Start execution time
@@ -369,8 +369,10 @@ class MetaTrainer():
                                 val_cuda_inputs = val_inputs.cuda()
                                 val_cuda_targets = val_targets.cuda()
 
-                            # Meta Validation 
-                            val_loss, val_cer, val_num_char = self.forward_one_batch(model, vocab, val_cuda_inputs, val_cuda_targets, val_percentages, val_input_sizes, val_target_sizes, smoothing, loss_type)
+                            # Meta Validation
+                            model.eval()
+                            with torch.no_grad():
+                                val_loss, val_cer, val_num_char = self.forward_one_batch(model, vocab, val_cuda_inputs, val_cuda_targets, val_percentages, val_input_sizes, val_target_sizes, smoothing, loss_type)
 
                             # batch_loss += val_loss
                             valid_total_loss += val_loss.item()
@@ -378,18 +380,6 @@ class MetaTrainer():
                             # Delete unused references
                             del val_inputs, val_input_sizes, val_percentages, val_targets, val_target_sizes, val_data
                             del val_cuda_inputs, val_cuda_targets
-                            
-                            # outer loop optimization
-                            if is_copy_grad:
-                                val_loss = val_loss / len(valid_data_list)
-                                val_loss.backward()
-
-                                model.add_copy_grad() # add model grad to copy grad
-                            else:
-                                valid_batch_loss += val_loss / len(valid_data_list)
-
-                            # Delete unused references
-                            del val_loss
                             
                             # Reset Weight
                             model.load_state_dict(weights_original)
