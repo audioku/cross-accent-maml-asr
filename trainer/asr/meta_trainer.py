@@ -76,15 +76,16 @@ class MetaTrainer():
         for param_group in optimizer.param_groups:
             return param_group['lr']
 
-    def train(self, model, vocab, train_data_list, valid_loader_list, loss_type, start_it, num_it, args, inner_opt=None, outer_opt=None, evaluate_every=1000, window_size=100, last_summary_every=10, last_metrics=None, early_stop=10, cpu_state_dict=False, is_copy_grad=False):
+    def train(self, model, vocab, train_data_list, valid_data_list, loss_type, start_it, num_it, num_valid_it, args, inner_opt=None, outer_opt=None, evaluate_every=1000, window_size=100, last_summary_every=1000, last_metrics=None, early_stop=10, cpu_state_dict=False, is_copy_grad=False):
         """
         Training
         args:
             model: Model object
             train_data_list: DataLoader object of the training set
-            valid_loader_list: a list of Validation DataLoader objects
+            valid_data_list: DataLoader object of the valid set
             start_it: start it (> 0 if you resume the process)
             num_it: last epoch
+            num_valid_it: number of batches for validation
             last_metrics: (if resume)
         """
         history = []
@@ -123,14 +124,14 @@ class MetaTrainer():
                 train_buffer[manifest_id].insert(0, batch_data)
             return train_buffer
 
-         # Parallelly fetch next batch data from all manifest
+        # Parallelly fetch next batch data from all manifest
         prefetch = threading.Thread(target=fetch_train_batch, 
                         args=([train_data_list, k_train, k_valid, train_data_buffer]))
         prefetch.start()
         
         it = start_it
         while it < num_it:
-             # Wait until the next batch data is ready
+            # Wait until the next batch data is ready
             prefetch.join()
             
             # Parallelly fetch next batch data from all manifest
@@ -163,13 +164,14 @@ class MetaTrainer():
                 outer_opt.zero_grad()
                 if is_copy_grad:
                     model.zero_copy_grad() # initialize copy_grad with 0
-
+                    
                 # Pop buffer for all manifest first
                 # so we can maintain the same number in the buffer list if exception occur
                 train_tmp_buffer = []
                 for manifest_id in range(len(train_data_buffer)):  
                     train_tmp_buffer.insert(0, train_data_buffer[manifest_id].pop())
-                    
+                        
+                # Start meta-training
                 # Loop over all tasks
                 for manifest_id in range(len(train_tmp_buffer)):                
                     # Retrieve manifest data
@@ -202,20 +204,22 @@ class MetaTrainer():
                     if args.clip:
                         torch.nn.utils.clip_grad_norm_(model.parameters(), args.max_norm)
                     inner_opt.step()
-                    
+
+                    # Move validation to cuda
                     if args.cuda:
-                        val_inputs = val_inputs.cuda()
-                        val_targets = val_targets.cuda()
+                        val_cuda_inputs = val_inputs.cuda()
+                        val_cuda_targets = val_targets.cuda()
 
                     # Meta Validation 
-                    val_loss, val_cer, val_num_char = self.forward_one_batch(model, vocab, val_inputs, val_targets, val_percentages, val_input_sizes, val_target_sizes, smoothing, loss_type)
+                    val_loss, val_cer, val_num_char = self.forward_one_batch(model, vocab, val_cuda_inputs, val_cuda_targets, val_percentages, val_input_sizes, val_target_sizes, smoothing, loss_type)
 
                     # batch_loss += val_loss
                     total_loss += val_loss.item()
                     
                     # Delete unused references
                     del val_inputs, val_input_sizes, val_percentages, val_targets, val_target_sizes, val_data
-
+                    del val_cuda_inputs, val_cuda_targets
+                    
                     # outer loop optimization
                     if is_copy_grad:
                         val_loss = val_loss / len(train_data_list)
@@ -267,59 +271,151 @@ class MetaTrainer():
                     logging.info("(Summary Iteration {} | MA {}) TRAIN LOSS:{:.4f} CER:{:.2f}%".format(
                         (it+1), window_size, sum(last_sum_loss)/len(last_sum_loss), sum(last_sum_cer)*100/sum(last_sum_char)))
 
-                # VALID
+                # Start meta-test
                 if (it + 1) % evaluate_every == 0:
                     print("")
                     logging.info("VALID")
                     model.eval()
 
-                    final_valid_losses = []
-                    final_valid_cers = []
-                    with torch.no_grad():
-                        for ind in range(len(valid_loader_list)):
-                            valid_loader = valid_loader_list[ind]
+                    # Define local variables
+                    valid_data_buffer = [[] for manifest_id in range(len(valid_data_list))]
 
-                            total_valid_loss, total_valid_cer, total_valid_wer, total_valid_char, total_valid_word = 0, 0, 0, 0, 0
-                            valid_pbar = tqdm(iter(valid_loader), leave=True, total=len(valid_loader))
-                            for i, (data) in enumerate(valid_pbar):
-                                # torch.cuda.empty_cache()
-                                src, trg, src_percentages, src_lengths, trg_lengths = data
-                                # try:
-                                if args.cuda:
-                                    src = src.cuda()
-                                    trg = trg.cuda()
-                                loss, cer, num_char = self.forward_one_batch(model, vocab, src, trg, src_percentages, src_lengths, trg_lengths, smoothing, loss_type)
-                                total_valid_cer += cer
-                                total_valid_char += num_char
+                    # Buffer for accumulating loss
+                    valid_batch_loss = 0
+                    valid_total_loss, valid_total_cer = 0, 0
+                    valid_total_char = 0
 
-                                total_valid_loss += loss.item()
-                                valid_pbar.set_description("VALID SET {} LOSS:{:.4f} CER:{:.2f}%".format(ind,
-                                    total_valid_loss/(i+1), total_valid_cer*100/total_valid_char))
+                    valid_last_sum_loss = deque(maxlen=window_size)
+                    valid_last_sum_cer = deque(maxlen=window_size)
+                    valid_last_sum_char = deque(maxlen=window_size)
+                        
+                    # Local variables
+                    weights_original = None
+                    valid_tmp_buffer = None
+
+                    # Parallelly fetch next batch data from all manifest
+                    prefetch = threading.Thread(target=fetch_train_batch, 
+                                    args=([valid_data_list, k_train, k_valid, valid_data_buffer]))
+                    prefetch.start()
+
+                    valid_it = 0
+                    while valid_it < num_valid_it:
+                        # Wait until the next batch data is ready
+                        prefetch.join()
+                        
+                        # Parallelly fetch next batch data from all manifest
+                        prefetch = threading.Thread(target=fetch_train_batch, 
+                                        args=([valid_data_list, k_train, k_valid, train_data_buffer]))
+                        prefetch.start()
+
+                        # Start execution time
+                        start_time = time.time()
+
+                        # Prepare model state dict (Based on experiment it doesn't yield any difference)
+                        if cpu_state_dict:
+                            model.cpu()
+                            weights_original = deepcopy(model.state_dict())
+                            model.cuda()
+                        else:
+                            weights_original = deepcopy(model.state_dict())
+
+                        # Reinit outer opt
+                        outer_opt.zero_grad()
+                        if is_copy_grad:
+                            model.zero_copy_grad() # initialize copy_grad with 0
+                            
+                        # Pop buffer for all manifest first
+                        # so we can maintain the same number in the buffer list if exception occur
+                        valid_tmp_buffer = []
+                        for manifest_id in range(len(valid_data_buffer)):  
+                            valid_tmp_buffer.insert(0, valid_data_buffer[manifest_id].pop())
                                 
-                                del src, trg, src_percentages, src_lengths, trg_lengths
+                        # Start meta-testing
+                        # Loop over all tasks
+                        for manifest_id in range(len(valid_tmp_buffer)):                
+                            # Retrieve manifest data
+                            tr_data, val_data = valid_tmp_buffer.pop()
+                            tr_inputs, tr_input_sizes, tr_percentages, tr_targets, tr_target_sizes = tr_data
+                            val_inputs, val_input_sizes, val_percentages, val_targets, val_target_sizes = val_data
+                            if args.cuda:
+                                tr_inputs = tr_inputs.cuda()
+                                tr_targets = tr_targets.cuda()
 
-                            final_valid_loss = total_valid_loss/(len(valid_loader))
-                            final_valid_cer = total_valid_cer*100/total_valid_char
+                            # Meta Train
+                            model.train()
+                            tr_loss, tr_cer, tr_num_char = self.forward_one_batch(model, vocab, tr_inputs, tr_targets, tr_percentages, tr_input_sizes, tr_target_sizes, smoothing, loss_type, verbose=False)
 
-                            final_valid_losses.append(final_valid_loss)
-                            final_valid_cers.append(final_valid_cer)
-                            print("VALID SET {} LOSS:{:.4f} CER:{:.2f}%".format(ind, final_valid_loss, final_valid_cer))
-                            logging.info("VALID SET {} LOSS:{:.4f} CER:{:.2f}%".format(ind, final_valid_loss, final_valid_cer))
+                            # Update train evaluation metric                    
+                            valid_total_cer += tr_cer
+                            valid_total_char += tr_num_char
 
-                            del total_valid_loss, total_valid_cer, total_valid_wer, total_valid_char, total_valid_word 
+                            # Delete unused references
+                            del tr_inputs, tr_input_sizes, tr_percentages, tr_targets, tr_target_sizes, tr_data
+
+                            # Inner Backward
+                            inner_opt.zero_grad()
+                            tr_loss.backward()
+                            
+                            # Delete unused references
+                            del tr_loss
+                            
+                            # Inner Update
+                            if args.clip:
+                                torch.nn.utils.clip_grad_norm_(model.parameters(), args.max_norm)
+                            inner_opt.step()
+
+                            # Move validation to cuda
+                            if args.cuda:
+                                val_cuda_inputs = val_inputs.cuda()
+                                val_cuda_targets = val_targets.cuda()
+
+                            # Meta Validation 
+                            val_loss, val_cer, val_num_char = self.forward_one_batch(model, vocab, val_cuda_inputs, val_cuda_targets, val_percentages, val_input_sizes, val_target_sizes, smoothing, loss_type)
+
+                            # batch_loss += val_loss
+                            valid_total_loss += val_loss.item()
+                            
+                            # Delete unused references
+                            del val_inputs, val_input_sizes, val_percentages, val_targets, val_target_sizes, val_data
+                            del val_cuda_inputs, val_cuda_targets
+                            
+                            # outer loop optimization
+                            if is_copy_grad:
+                                val_loss = val_loss / len(valid_data_list)
+                                val_loss.backward()
+
+                                model.add_copy_grad() # add model grad to copy grad
+                            else:
+                                valid_batch_loss += val_loss / len(valid_data_list)
+
+                            # Delete unused references
+                            del val_loss
+                            
+                            # Reset Weight
+                            model.load_state_dict(weights_original)
+
+                        # Record performance
+                        valid_last_sum_cer.append(valid_total_cer)
+                        valid_last_sum_char.append(valid_total_char)
+                        valid_last_sum_loss.append(valid_total_loss/len(valid_data_list))
+
+                        # Record execution time
+                        end_time = time.time()
+                        diff_time = end_time - start_time
+                        total_time += diff_time
+
+                    print("(Iteration {}) VALID LOSS:{:.4f} CER:{:.2f}%".format(
+                        (it+1), sum(valid_last_sum_loss)/len(valid_last_sum_loss), sum(valid_last_sum_cer)*100/sum(valid_last_sum_char)), flush=True)
+                    logging.info("(Iteration {}) VALID LOSS:{:.4f} CER:{:.2f}%".format(
+                        (it+1), sum(valid_last_sum_loss)/len(valid_last_sum_loss), sum(valid_last_sum_cer)*100/sum(valid_last_sum_char)))
 
                     metrics = {}
-                    avg_valid_loss = sum(final_valid_losses) / len(final_valid_losses)
-                    avg_valid_cer = sum(final_valid_cers) / len(final_valid_cers)
-                    metrics["avg_valid_loss"] = sum(final_valid_losses) / len(final_valid_losses)
-                    metrics["avg_valid_cer"] = sum(final_valid_cers) / len(final_valid_cers)
-                    metrics["valid_loss"] = final_valid_losses
-                    metrics["valid_cer"] = final_valid_cers
+                    avg_valid_loss = sum(valid_last_sum_loss)/len(valid_last_sum_loss)
+                    avg_valid_cer = sum(valid_last_sum_cer)*100/sum(valid_last_sum_char)
+                    metrics["avg_valid_loss"] = sum(valid_last_sum_loss)/len(valid_last_sum_loss)
+                    metrics["avg_valid_cer"] = sum(valid_last_sum_cer)*100/sum(valid_last_sum_char)
                     metrics["history"] = history
                     history.append(metrics)
-
-                    print("AVG VALID LOSS:{:.4f} AVG CER:{:.2f}%".format(sum(final_valid_losses) / len(final_valid_losses), sum(final_valid_cers) / len(final_valid_cers)))
-                    logging.info("AVG VALID LOSS:{:.4f} AVG CER:{:.2f}%".format(sum(final_valid_losses) / len(final_valid_losses), sum(final_valid_cers) / len(final_valid_cers)))
 
                     if (it+1) % args.save_every == 0:
                         save_meta_model(model, vocab, (it+1), inner_opt, outer_opt, metrics, args, best_model=False)
@@ -360,6 +456,7 @@ class MetaTrainer():
 
                 tr_inputs, tr_input_sizes, tr_percentages, tr_targets, tr_target_sizes = None, None, None, None, None
                 val_inputs, val_input_sizes, val_percentages, val_targets, val_target_sizes = None, None, None, None, None       
+                val_cuda_inputs, val_cuda_targets = None, None
                 tr_loss, val_loss = None, None
                 weights_original = None
                 batch_loss = 0
