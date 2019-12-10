@@ -271,7 +271,7 @@ class SpectrogramDataset(Dataset, SpectrogramParser):
             sample = ids[tr_ids[i]]
             audio_path, transcript_path = sample[0], sample[1]
             spect = self.parse_audio(audio_path)[:,:self.args.src_max_len]
-            transcript = self.parse_transcript(transcript_path, True)
+            transcript = self.parse_transcript(transcript_path)
             
             tr_spect.append(spect)
             tr_transcript.append(transcript)
@@ -373,71 +373,6 @@ class SpectrogramDataset(Dataset, SpectrogramParser):
     def __len__(self):
         return self.max_size
 
-class CPT2LogFBankDataset(Dataset):
-    def __init__(self, tokenizer, args, audio_conf, manifest_filepath_list, normalize=False, augment=False, is_train=False):
-        """
-        Dataset that loads tensors via a csv containing file paths to audio files and transcripts separated by
-        a comma. Each new line is a different sample. Example below:
-        /path/to/audio.wav,/path/to/audio.txt
-        ...
-        :param audio_conf: Dictionary containing the sample rate, window and the window length/stride in seconds
-        :param manifest_filepath: Path to manifest csv as describe above
-        :param labels: String containing all the possible characters to map to
-        :param normalize: Apply standard mean and deviation normalization to audio tensor
-        :param augment(default False):  Apply random tempo and gain perturbations
-        """
-        self.max_size = 0
-        self.ids_list = []
-        for i in range(len(manifest_filepath_list)):
-            manifest_filepath = manifest_filepath_list[i]
-            with open(manifest_filepath) as f:
-                ids = f.readlines()
-
-            ids = [x.strip().split(',') for x in ids]
-            self.ids_list.append(ids)
-            self.max_size = max(len(ids), self.max_size)
-
-        self.max_size = self.max_size * len(manifest_filepath_list)
-        print("max_size:", self.max_size)
-
-        self.manifest_filepath_list = manifest_filepath_list
-        self.normalize = normalize
-        self.tokenizer = tokenizer
-
-        super(CPT2LogFBankDataset, self).__init__()
-
-    def __getitem__(self, index):
-        # lang_id = random.randint(0, len(self.ids_list)-1)
-        lang_id = index % len(self.manifest_filepath_list)
-        sample_id = index // len(self.manifest_filepath_list)
-        ids = self.ids_list[lang_id]
-        sample = ids[sample_id % len(ids)]
-        # print(lang_id, sample_id)
-        audio_path, transcript_path = sample[0], sample[1]
-        feat = self.parse_audio(audio_path)
-        transcript = self.parse_transcript(transcript_path)
-        return feat, transcript
-
-    def parse_audio(self, path):
-        (rate,sig) = wav.read(path)
-        fbank_feat = logfbank(sig,rate,nfilt=80)
-        fbank_feat = torch.FloatTensor(np.transpose(fbank_feat, (1, 0)))
-        # print(fbank_feat.size())
-        if self.normalize:
-            mean = fbank_feat.mean()
-            std = fbank_feat.std()
-            fbank_feat.add_(-mean)
-            fbank_feat.div_(std)
-        return fbank_feat
-
-    def parse_transcript(self, transcript_path):
-        with open(transcript_path, 'r', encoding='utf8') as transcript_file:
-            cur_transcript = " " + transcript_file.read().replace('\n', '').lower()
-        bpes = self.tokenizer.encode(cur_transcript)
-        return bpes
-
-    def __len__(self):
-        return self.max_size
 
 class NoiseInjection(object):
     def __init__(self,
