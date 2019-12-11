@@ -500,5 +500,8 @@ class MetaTrainer():
                 tr_loss, val_loss = None, None
                 weights_original = None
                 batch_loss = 0
+                
+                if discriminator is not None:
+                    disc_loss, enc_loss = None, None
         
                 torch.cuda.empty_cache()

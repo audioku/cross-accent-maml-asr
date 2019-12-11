@@ -235,7 +235,8 @@ class JointTrainer():
                         # disc_loss.backward(retain_graph=True)
                         # enc_loss.backward(retain_graph=True)
                         tr_loss.backward()
-                        
+
+                        del disc_loss, enc_loss
                     else:
                         # outer loop optimization
                         tr_loss.backward()
@@ -374,5 +375,8 @@ class JointTrainer():
                 val_inputs, val_input_sizes, val_percentages, val_targets, val_target_sizes = None, None, None, None, None  
                 tr_loss, val_loss = None, None
                 batch_loss = None
+
+                if discriminator is not None:
+                    disc_loss, enc_loss = None, None
         
                 torch.cuda.empty_cache()
