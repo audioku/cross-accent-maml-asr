@@ -75,6 +75,48 @@ class Transformer(nn.Module):
             if p.dim() > 1:
                 nn.init.xavier_uniform_(p)
 
+    def encode(self, padded_input, input_lengths):
+        """
+        args:
+            padded_input: B x 1 (channel for spectrogram=1) x (freq) x T
+            padded_input: B x T x D
+            input_lengths: B
+        output:
+            encoder_padded_outputs: B x T x H
+        """
+        # try:                
+        if self.feat_extractor == 'emb_cnn' or self.feat_extractor == 'vgg_cnn' or self.feat_extractor == 'large_cnn':
+            padded_input = self.conv(padded_input)
+
+        # Reshaping features
+        sizes = padded_input.size() # B x H_1 (channel?) x H_2 x T
+        padded_input = padded_input.view(sizes[0], sizes[1] * sizes[2], sizes[3])
+        padded_input = padded_input.transpose(1, 2).contiguous()  # BxTxH
+        
+        encoder_padded_outputs, _ = self.encoder(padded_input, input_lengths)
+
+        return encoder_padded_outputs
+
+    def decode(self, encoder_padded_outputs, input_lengths, padded_target):
+        """
+        args:
+            encoder_padded_outputs: B x T x H
+            padded_input: B x T x D
+            input_lengths: B
+        output:
+            pred: B x T x vocab
+            gold: B x T
+        """
+        pred_list, gold_list, *_ = self.decoder(padded_target, encoder_padded_outputs, input_lengths)
+
+        # hyp_list = []
+        # print(pred_list.size())
+        # print(gold_list.size())
+        hyp_best_scores, hyp_best_ids = torch.topk(pred_list, 1, dim=2)
+        hyp_list = hyp_best_ids.squeeze(2)
+        # print(hyp_list.size())
+        return pred_list, gold_list, hyp_list
+
     def forward(self, padded_input, input_lengths, padded_target, verbose=False):
         """
         args:

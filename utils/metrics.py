@@ -160,3 +160,24 @@ def calculate_loss(pred, gold, pad_id, input_lengths=None, target_lengths=None, 
         print("loss is not defined")
 
     return loss
+
+def calculate_adversarial(pred, accent_id):
+    """
+    args:
+        pred: prediction for one batch (B x C)
+        accent_id: accent id for this batch (1)
+    output:
+        discriminator_loss
+        encoder_loss
+    """
+    pred_size = pred.size()
+    gold_for_discriminator = torch.cuda.LongTensor(pred_size[0]).fill_(accent_id)
+    gold_for_encoder = torch.cuda.FloatTensor(pred_size[0], pred_size[1]).fill_(1/pred_size[1])
+
+    discriminator_loss = F.cross_entropy(pred, gold_for_discriminator)
+    encoder_loss = F.mse_loss(pred, gold_for_encoder)
+
+    return discriminator_loss, encoder_loss
+
+def calculate_multi_task(pred, gold):
+    pass

@@ -15,7 +15,7 @@ from torch.autograd import Variable
 from trainer.asr.joint_trainer import JointTrainer
 from utils.data import Vocab
 from utils.data_loader import SpectrogramDataset, LogFBankDataset, AudioDataLoader, BucketingSampler
-from utils.functions import load_joint_model, init_transformer_model, init_optimizer, compute_num_params, generate_labels
+from utils.functions import load_joint_model, init_transformer_model, init_discriminator_model, init_optimizer, compute_num_params, generate_labels
 
 parser = argparse.ArgumentParser(description='Transformer ASR meta training')
 parser.add_argument('--model', default='TRFS', type=str, help="")
@@ -112,6 +112,13 @@ parser.add_argument('--cpu-state-dict', action='store_true', help='store state d
 # Finetune
 parser.add_argument('--finetune', action='store_true', help="") 
 
+# Multi-Task
+parser.add_argument('--multitask', action='store_true', help='conduct multi-task training')
+parser.add_argument('--num_class', default=10, type=int, help="number of accents in the training")
+
+# Adversarial training
+parser.add_argument('--adversarial', action='store_true', help='adversarial training')
+
 torch.manual_seed(123456)
 torch.cuda.manual_seed_all(123456)
 np.random.seed(123456)
@@ -190,6 +197,10 @@ if __name__ == '__main__':
     else:
         if args.model == "TRFS":
             model = init_transformer_model(args, vocab, is_factorized=args.is_factorized, r=args.r)
+            if args.adversarial:
+                discriminator = init_discriminator_model(args)
+            else:
+                discriminator = None
         else:
             logging.info("The model is not supported, check args --h")
     
@@ -197,6 +208,8 @@ if __name__ == '__main__':
 
     if USE_CUDA:
         model = model.cuda()
+        if args.adversarial:
+            discriminator = discriminator.cuda()
 
     logging.info(model)
     num_epochs = args.epochs
@@ -204,4 +217,4 @@ if __name__ == '__main__':
     print("Parameters: {}(trainable), {}(non-trainable)".format(compute_num_params(model)[0], compute_num_params(model)[1]))
 
     trainer = JointTrainer()
-    trainer.train(model, vocab, train_data_list, valid_loader_list, loss_type, start_epoch, num_epochs, args, evaluate_every=args.evaluate_every, last_metrics=metrics, early_stop=args.early_stop, cpu_state_dict=args.cpu_state_dict, is_copy_grad=args.copy_grad)
+    trainer.train(model, vocab, train_data_list, valid_loader_list, loss_type, start_epoch, num_epochs, args, evaluate_every=args.evaluate_every, last_metrics=metrics, early_stop=args.early_stop, cpu_state_dict=args.cpu_state_dict, is_copy_grad=args.copy_grad, discriminator=discriminator)

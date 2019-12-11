@@ -108,6 +108,10 @@ parser.add_argument('--factorize', action='store_true', help='factorize')
 parser.add_argument('--copy-grad', action='store_true', help="copy grad for MAML") # Useless
 parser.add_argument('--cpu-state-dict', action='store_true', help='store state dict in cpu')
 
+# Adversarial training
+parser.add_argument('--adversarial', action='store_true', help='adversarial training')
+parser.add_argument('--num_class', default=10, type=int, help="number of accents in the training")
+
 torch.manual_seed(123456)
 torch.cuda.manual_seed_all(123456)
 np.random.seed(123456)
