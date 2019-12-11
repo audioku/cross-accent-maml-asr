@@ -168,12 +168,13 @@ class JointTrainer():
             batch_loss = 0
             total_loss, total_cer = 0, 0
             total_char = 0
-            if discriminator is not None:
-                total_disc_loss, total_enc_loss = 0, 0
+            total_disc_loss, total_enc_loss = 0, 0
+            
             # Local variables
             tr_inputs, tr_input_sizes, tr_percentages, tr_targets, tr_target_sizes  = None, None, None, None, None
             val_inputs, val_input_sizes, val_percentages, val_targets, val_target_sizes = None, None, None, None, None
             tr_loss, val_loss = None, None
+            disc_loss, enc_loss = None, None
             
             beta = 1
             beta_decay = 0.99997
@@ -379,8 +380,6 @@ class JointTrainer():
                 val_inputs, val_input_sizes, val_percentages, val_targets, val_target_sizes = None, None, None, None, None  
                 tr_loss, val_loss = None, None
                 batch_loss = None
-
-                if discriminator is not None:
-                    disc_loss, enc_loss = None, None
+                disc_loss, enc_loss = None, None
         
                 torch.cuda.empty_cache()
