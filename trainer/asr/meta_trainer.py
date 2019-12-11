@@ -122,7 +122,7 @@ class MetaTrainer():
             outer_opt = torch.optim.Adam(model.parameters(), lr=args.meta_lr)
 
         if discriminator is not None:
-            opt_disc = torch.optim.Adam(discriminator.parameters(), lr=args.lr)
+            disc_opt = torch.optim.Adam(discriminator.parameters(), lr=args.lr)
 
         last_sum_loss = deque(maxlen=window_size)
         last_sum_cer = deque(maxlen=window_size)
@@ -180,7 +180,7 @@ class MetaTrainer():
                 # Reinit outer opt
                 outer_opt.zero_grad()
                 if discriminator is not None:
-                    opt_disc.zero_grad()
+                    disc_opt.zero_grad()
 
                 if is_copy_grad:
                     model.zero_copy_grad() # initialize copy_grad with 0
@@ -270,6 +270,8 @@ class MetaTrainer():
 
                     # Delete unused references
                     del val_loss
+                    if discriminator is not None:
+                        del enc_loss, disc_loss
                     
                     # Reset Weight
                     model.load_state_dict(weights_original)
@@ -283,6 +285,7 @@ class MetaTrainer():
 
                     if discriminator is not None: # copy grad from copy_grad to discriminator
                         discriminator.from_copy_grad()
+                        disc_opt.step()
                 else:
                     batch_loss.backward()
                     del batch_loss
@@ -456,7 +459,7 @@ class MetaTrainer():
                     if (it+1) % args.save_every == 0:
                         save_meta_model(model, vocab, (it+1), inner_opt, outer_opt, metrics, args, best_model=False)
                         if discriminator is not None:
-                            save_discriminator(discriminator, (it+1), opt_disc, args, best_model=False)
+                            save_discriminator(discriminator, (it+1), disc_opt, args, best_model=False)
 
                     # save the best model
                     early_stop_criteria, early_stop_val
@@ -467,7 +470,7 @@ class MetaTrainer():
                             best_valid_val = avg_valid_cer
                             save_meta_model(model, vocab, (it+1), inner_opt, outer_opt, metrics, args, best_model=True)
                             if discriminator is not None:
-                                save_discriminator(discriminator, (it+1), opt_disc, args, best_model=True)
+                                save_discriminator(discriminator, (it+1), disc_opt, args, best_model=True)
                         else:
                             print("count_stop:", count_stop)
                             count_stop += 1
