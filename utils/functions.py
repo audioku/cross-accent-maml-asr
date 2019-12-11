@@ -9,7 +9,7 @@ import numpy as np
 # from models.asr.transformer_cpt2 import TransformerCPT2, Encoder, Decoder
 from models.asr.transformer import Transformer
 from transformers import BertModel
-from modules import Encoder, Decoder
+from modules import Encoder, Decoder, Discriminator
 from models.asr.transformer import Transformer
 from utils.optimizer import NoamOpt, AnnealingOpt
 
@@ -304,6 +304,13 @@ def init_transformer_model(args, vocab, train=True, is_factorized=False, r=100):
     model = Transformer(encoder, decoder, vocab, feat_extractor=feat_extractor, train=train)
 
     return model
+
+def init_discriminator_model(args):
+    dim_model = args.dim_model
+    num_class = args.num_class
+    discriminator = Discriminator(dim_model, num_class)
+
+    return discriminator
 
 def post_process(string, special_token_list):
     for i in range(len(special_token_list)):

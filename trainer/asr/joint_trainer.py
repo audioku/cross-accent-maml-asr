@@ -12,7 +12,7 @@ from tqdm import tqdm
 from collections import deque
 from utils.functions import save_meta_model, save_joint_model, post_process
 from utils.optimizer import NoamOpt
-from utils.metrics import calculate_metrics, calculate_cer, calculate_wer
+from utils.metrics import calculate_metrics, calculate_cer, calculate_wer, calculate_adversarial, calculate_multi_task
 from torch.autograd import Variable
 
 class JointTrainer():
@@ -22,8 +22,16 @@ class JointTrainer():
     def __init__(self):
         logging.info("Joint Trainer is initialized")
 
-    def forward_one_batch(self, model, vocab, src, trg, src_percentages, src_lengths, trg_lengths, smoothing, loss_type, verbose=False):
-        pred, gold, hyp = model(src, src_lengths, trg, verbose=False)
+    def forward_one_batch(self, model, vocab, src, trg, src_percentages, src_lengths, trg_lengths, smoothing, loss_type, verbose=False, discriminator=None, accent_id=None):
+        if discriminator is None:
+            pred, gold, hyp = model(src, src_lengths, trg, verbose=False)
+        else:
+            enc_output = model.encode(src, src_lengths)
+            accent_pred = discriminator(enc_output)
+            pred, gold, hyp = model.decode(enc_output, src_lengths, trg)
+            # calculate discriminator loss and encoder loss
+            disc_loss, enc_loss = calculate_adversarial(accent_pred, accent_id)
+
         strs_golds, strs_hyps = [], []
 
         for j in range(len(gold)):
@@ -70,13 +78,16 @@ class JointTrainer():
             print("PRED:", strs_hyps)
             print("GOLD:", strs_golds, flush=True)
 
-        return loss, total_cer, total_char
+        if discriminator is None:
+            return loss, total_cer, total_char
+        else:
+            return loss, total_cer, total_char, disc_loss, enc_loss
 
     def get_lr(self, optimizer):
         for param_group in optimizer.param_groups:
             return param_group['lr']
 
-    def train(self, model, vocab, train_data_list, valid_loader_list, loss_type, start_it, num_it, args, evaluate_every=1000, window_size=100, last_summary_every=1000, last_metrics=None, early_stop=10, cpu_state_dict=False, is_copy_grad=False, opt_name="adam"):
+    def train(self, model, vocab, train_data_list, valid_loader_list, loss_type, start_it, num_it, args, evaluate_every=1000, window_size=100, last_summary_every=1000, last_metrics=None, early_stop=10, cpu_state_dict=False, is_copy_grad=False, opt_name="adam", discriminator=None):
         """
         Training
         args:
@@ -104,8 +115,12 @@ class JointTrainer():
         # define the optimizer
         if opt_name == "adam":
             opt = torch.optim.Adam(model.parameters(), lr=args.lr)
+            if discriminator is not None:
+                opt_disc = torch.optim.Adam(discriminator.parameters(), lr=args.lr)
         elif opt_name == "sgd":
             opt = torch.optim.SGD(model.parameters(), lr=args.lr)
+            if discriminator is not None:
+                opt_disc = torch.optim.SGD(discriminator.parameters(), lr=args.lr)
         else:
             opt = None
         # opt = NoamOpt(args.dim_model, args.k_lr, args.warmup, torch.optim.Adam(model.parameters(), betas=(0.9, 0.98), eps=1e-9), min_lr=args.min_lr)
@@ -144,7 +159,8 @@ class JointTrainer():
             batch_loss = 0
             total_loss, total_cer = 0, 0
             total_char = 0
-                
+            if discriminator is not None:
+                total_disc_loss, total_enc_loss = 0, 0
             # Local variables
             tr_inputs, tr_input_sizes, tr_percentages, tr_targets, tr_target_sizes  = None, None, None, None, None
             val_inputs, val_input_sizes, val_percentages, val_targets, val_target_sizes = None, None, None, None, None
@@ -178,8 +194,11 @@ class JointTrainer():
                         tr_targets = tr_targets.cuda()
 
                     # Train
-                    tr_loss, tr_cer, tr_num_char = self.forward_one_batch(model, vocab, tr_inputs, tr_targets, tr_percentages, tr_input_sizes, tr_target_sizes, smoothing, loss_type, verbose=False)
-
+                    if discriminator is None:
+                        tr_loss, tr_cer, tr_num_char = self.forward_one_batch(model, vocab, tr_inputs, tr_targets, tr_percentages, tr_input_sizes, tr_target_sizes, smoothing, loss_type, verbose=False, discriminator=None, accent_id=None)
+                    else:
+                        tr_loss, tr_cer, tr_num_char, disc_loss, enc_loss = self.forward_one_batch(model, vocab, tr_inputs, tr_targets, tr_percentages, tr_input_sizes, tr_target_sizes, smoothing, loss_type, verbose=False, discriminator=discriminator, accent_id=manifest_id)
+                    
                     # Update train evaluation metric                    
                     total_cer += tr_cer
                     total_char += tr_num_char
@@ -196,6 +215,18 @@ class JointTrainer():
 
                     # Delete unused references
                     del tr_loss
+
+                    # adversarial training
+                    if discriminator is not None:
+                        if it % 2 == 0:
+                            disc_loss.backward()
+                            total_disc_loss += disc_loss.item()
+                        else:
+                            enc_loss.backward()
+                            total_enc_loss += enc_loss.item()
+                        
+                        del disc_loss
+                        del enc_loss
                     
                 # Outer loop optimization                
                 if args.clip:
@@ -212,10 +243,16 @@ class JointTrainer():
                 diff_time = end_time - start_time
                 total_time += diff_time
 
-                print("(Iteration {}) TRAIN LOSS:{:.4f} CER:{:.2f}% LR:{:.7f} TOTAL TIME:{:.7f}".format(
-                    (it+1), total_loss/len(train_data_list), total_cer*100/total_char, self.get_lr(opt), total_time))         
-                logging.info("(Iteration {}) TRAIN LOSS:{:.4f} CER:{:.2f}% LR:{:.7f} TOTAL TIME:{:.7f}".format(
-                    (it+1), total_loss/len(train_data_list), total_cer*100/total_char, self.get_lr(opt), total_time))
+                if discriminator is None:
+                    print("(Iteration {}) TRAIN LOSS:{:.4f} CER:{:.2f}% LR:{:.7f} TOTAL TIME:{:.7f}".format(
+                        (it+1), total_loss/len(train_data_list), total_cer*100/total_char, self.get_lr(opt), total_time))         
+                    logging.info("(Iteration {}) TRAIN LOSS:{:.4f} CER:{:.2f}% LR:{:.7f} TOTAL TIME:{:.7f}".format(
+                        (it+1), total_loss/len(train_data_list), total_cer*100/total_char, self.get_lr(opt), total_time))
+                else:
+                    print("(Iteration {}) TRAIN LOSS:{:.4f} DISC LOSS:{:.4f} ENC LOSS:{:.4f} CER:{:.2f}% LR:{:.7f} TOTAL TIME:{:.7f}".format(
+                        (it+1), total_loss/len(train_data_list), total_disc_loss/len(train_data_list), total_enc_loss/len(train_data_list), total_cer*100/total_char, self.get_lr(opt), total_time))         
+                    logging.info("(Iteration {}) TRAIN LOSS:{:.4f} DISC LOSS:{:.4f} ENC LOSS:{:.4f} CER:{:.2f}% LR:{:.7f} TOTAL TIME:{:.7f}".format(
+                        (it+1), total_loss/len(train_data_list), total_loss/len(train_data_list), total_disc_loss/len(train_data_list), total_cer*100/total_char, self.get_lr(opt), total_time))
 
                 if (it + 1) % last_summary_every == 0:
                     print("(Summary Iteration {} | MA {}) TRAIN LOSS:{:.4f} CER:{:.2f}%".format(
