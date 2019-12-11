@@ -28,9 +28,18 @@ class JointTrainer():
         else:
             enc_output = model.encode(src, src_lengths)
             accent_pred = discriminator(torch.sum(enc_output, dim=1))
+            # calculate discriminator loss and encoder loss
+            disc_loss, _ = calculate_adversarial(accent_pred, accent_id)
+
+            # update disc
+
+            enc_output = model.encode(src, src_lengths)
+            accent_pred = discriminator(torch.sum(enc_output, dim=1))
             pred, gold, hyp = model.decode(enc_output, src_lengths, trg)
             # calculate discriminator loss and encoder loss
-            disc_loss, enc_loss = calculate_adversarial(accent_pred, accent_id)
+            _, enc_loss = calculate_adversarial(accent_pred, accent_id)
+
+            # update model
 
         strs_golds, strs_hyps = [], []
 
@@ -207,27 +216,34 @@ class JointTrainer():
 
                     # Delete unused references
                     del tr_inputs, tr_input_sizes, tr_percentages, tr_targets, tr_target_sizes, tr_data
-                                        
-                    # outer loop optimization
+
+                    total_loss += tr_loss.item()
+
                     tr_loss = tr_loss / len(train_data_list)
                     # adversarial training
                     if discriminator is not None:
-                        if it % 2 == 0:
-                            disc_loss = disc_loss / len(train_data_list)
-                            tr_loss = tr_loss + disc_loss
-                            total_disc_loss += disc_loss.item()
-                        else:
-                            enc_loss = enc_loss / len(train_data_list)
-                            tr_loss = tr_loss + enc_loss
-                            total_enc_loss += enc_loss.item()
+                        disc_loss = 0.5 * disc_loss
                         
-                    tr_loss.backward()
-                    
-                    # batch_loss += val_loss
-                    total_loss += tr_loss.item()
+                        total_disc_loss += disc_loss.item()
+                        total_enc_loss += enc_loss.item()
+
+                        disc_loss = disc_loss / len(train_data_list)
+                        enc_loss = enc_loss / len(train_data_list)
+                        
+                        tr_loss = tr_loss + disc_loss + enc_loss
+                        # tr_loss.backward(retain_graph=True)
+                        # disc_loss.backward(retain_graph=True)
+                        # enc_loss.backward(retain_graph=True)
+                        tr_loss.backward()
+                        
+                    else:
+                        # outer loop optimization
+                        tr_loss.backward()
 
                     # Delete unused references
                     del tr_loss
+
+                    # batch_loss += val_loss
                     
                 # Outer loop optimization                
                 if args.clip:
@@ -255,7 +271,7 @@ class JointTrainer():
                     print("(Iteration {}) TRAIN LOSS:{:.4f} DISC LOSS:{:.4f} ENC LOSS:{:.4f} CER:{:.2f}% LR:{:.7f} TOTAL TIME:{:.7f}".format(
                         (it+1), total_loss/len(train_data_list), total_disc_loss/len(train_data_list), total_enc_loss/len(train_data_list), total_cer*100/total_char, self.get_lr(opt), total_time))         
                     logging.info("(Iteration {}) TRAIN LOSS:{:.4f} DISC LOSS:{:.4f} ENC LOSS:{:.4f} CER:{:.2f}% LR:{:.7f} TOTAL TIME:{:.7f}".format(
-                        (it+1), total_loss/len(train_data_list), total_loss/len(train_data_list), total_disc_loss/len(train_data_list), total_cer*100/total_char, self.get_lr(opt), total_time))
+                        (it+1), total_loss/len(train_data_list), total_disc_loss/len(train_data_list), total_enc_loss/len(train_data_list), total_cer*100/total_char, self.get_lr(opt), total_time))
 
                 if (it + 1) % last_summary_every == 0:
                     print("(Summary Iteration {} | MA {}) TRAIN LOSS:{:.4f} CER:{:.2f}%".format(

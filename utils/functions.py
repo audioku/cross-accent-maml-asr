@@ -271,6 +271,30 @@ def load_model(load_path, train=True):
 
     return model, vocab, opt, epoch, metrics, args
 
+def load_discriminator(load_path, train=True):
+    """
+    Loading discriminator
+    args:
+        load_path: string
+    """
+    checkpoint = torch.load(load_path, map_location=torch.device('cpu'))
+
+    epoch = checkpoint['epoch']
+    if 'args' in checkpoint:
+        args = checkpoint['args']
+
+    discriminator = init_discriminator_model(args)
+    discriminator.load_state_dict(checkpoint['model_state_dict'])
+    if args.cuda:
+        print("CUDA")
+        discriminator = discriminator.cuda()
+    else:
+        discriminator = discriminator.cpu()
+
+    opt = torch.optim.Adam(discriminator.parameters(), lr=args.lr)
+    opt.load_state_dict(checkpoint['opt'].state_dict())
+
+    return discriminator, opt
 
 def init_optimizer(args, model, opt_type="noam"):
     dim_input = args.dim_input
