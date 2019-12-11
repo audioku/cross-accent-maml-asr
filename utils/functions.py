@@ -70,6 +70,34 @@ def save_joint_model(model, vocab, epoch, opt, metrics, args, best_model=False):
         logging.info("Loss is not defined")
     torch.save(args, save_path)
 
+def save_discriminator(discriminator, epoch, opt, args, best_model=False):
+    """
+    Saving discriminator
+    """
+    if best_model:
+        save_path = "{}/{}/best_discriminator.th".format(
+            args.save_folder, args.name)
+    else:
+        save_path = "{}/{}/epoch_{}.th".format(args.save_folder,
+                                               args.name, epoch)
+
+    if not os.path.exists(args.save_folder + "/" + args.name):
+        os.makedirs(args.save_folder + "/" + args.name)
+    
+    print("SAVE DISCRIMINATOR to", save_path)
+    logging.info("SAVE DISCRIMINATOR to " + save_path)
+    if args.loss == "ce":
+        args = {
+            'args': args,
+            'epoch': epoch,
+            'model_state_dict': discriminator.state_dict(),
+            'opt': opt
+        }
+    else:
+        print("Loss is not defined")
+        logging.info("Loss is not defined")
+    torch.save(args, save_path)
+
 def save_meta_model(model, vocab, epoch, inner_opt, outer_opt, metrics, args, best_model=False):
     """
     Saving model, TODO adding history

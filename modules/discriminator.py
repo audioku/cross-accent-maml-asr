@@ -7,6 +7,8 @@ class Discriminator(nn.Module):
     Discriminator for adversarial training and multi-task learning
     """
     def __init__(self, feat_dim, num_class):
+        super(Discriminator, self).__init__()
+        
         self.linear = nn.Linear(feat_dim, num_class)
     
     def forward(self, inputs):
