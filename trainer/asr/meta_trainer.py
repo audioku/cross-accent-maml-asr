@@ -399,10 +399,6 @@ class MetaTrainer():
                             model.train()
                             tr_loss, tr_cer, tr_num_char = self.forward_one_batch(model, vocab, tr_inputs, tr_targets, tr_percentages, tr_input_sizes, tr_target_sizes, smoothing, loss_type, verbose=False)
 
-                            # Update train evaluation metric                    
-                            valid_total_cer += tr_cer # HERE?
-                            valid_total_char += tr_num_char # HERE?
-
                             # Delete unused references
                             del tr_inputs, tr_input_sizes, tr_percentages, tr_targets, tr_target_sizes, tr_data
 
@@ -428,8 +424,10 @@ class MetaTrainer():
                             with torch.no_grad():
                                 val_loss, val_cer, val_num_char = self.forward_one_batch(model, vocab, val_inputs, val_targets, val_percentages, val_input_sizes, val_target_sizes, smoothing, loss_type)
 
-                            # batch_loss += val_loss
-                            valid_total_loss += val_loss.item()
+                            # Update train evaluation metric
+                            valid_total_loss += val_loss.item()                    
+                            valid_total_cer += tr_cer
+                            valid_total_char += tr_num_char
                             
                             # Delete unused references
                             del val_inputs, val_input_sizes, val_percentages, val_targets, val_target_sizes, val_data
