@@ -15,7 +15,7 @@ from torch.autograd import Variable
 from trainer.asr.joint_trainer import JointTrainer
 from utils.data import Vocab
 from utils.data_loader import SpectrogramDataset, LogFBankDataset, AudioDataLoader, BucketingSampler
-from utils.functions import load_joint_model, init_transformer_model, init_discriminator_model, init_optimizer, compute_num_params, generate_labels
+from utils.functions import load_joint_model, load_discriminator, init_transformer_model, init_discriminator_model, init_optimizer, compute_num_params, generate_labels
 
 parser = argparse.ArgumentParser(description='Transformer ASR meta training')
 parser.add_argument('--model', default='TRFS', type=str, help="")
@@ -118,6 +118,7 @@ parser.add_argument('--num_class', default=10, type=int, help="number of accents
 
 # Adversarial training
 parser.add_argument('--adversarial', action='store_true', help='adversarial training')
+parser.add_argument('--beta_decay', action='store_true', help='decrease the weight of discriminator')
 
 torch.manual_seed(123456)
 torch.cuda.manual_seed_all(123456)
@@ -194,6 +195,10 @@ if __name__ == '__main__':
         model, vocab, opt, epoch, metrics, loaded_args = load_joint_model(args.continue_from)
         start_epoch = (epoch)  # index starts from zero
         verbose = args.verbose
+        if args.adversarial:
+            discriminator, opt_disc = load_discriminator(args.continue_from)
+        else:
+            discriminator = None
     else:
         if args.model == "TRFS":
             model = init_transformer_model(args, vocab, is_factorized=args.is_factorized, r=args.r)

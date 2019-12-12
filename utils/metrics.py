@@ -176,6 +176,9 @@ def calculate_adversarial(pred, accent_id):
 
     discriminator_loss = F.cross_entropy(pred, gold_for_discriminator)
     encoder_loss = F.mse_loss(pred, gold_for_encoder)
+    
+    # It should be unnecessary, but let's try
+    del gold_for_discriminator, gold_for_encoder
 
     return discriminator_loss, encoder_loss
 

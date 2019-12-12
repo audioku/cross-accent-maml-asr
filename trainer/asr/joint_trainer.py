@@ -10,7 +10,7 @@ from copy import deepcopy
 from tqdm import tqdm
 # from utils import constant
 from collections import deque
-from utils.functions import save_meta_model, save_joint_model, post_process
+from utils.functions import save_meta_model, save_joint_model, save_discriminator, post_process
 from utils.optimizer import NoamOpt
 from utils.metrics import calculate_metrics, calculate_cer, calculate_wer, calculate_adversarial, calculate_multi_task
 from torch.autograd import Variable
@@ -27,10 +27,19 @@ class JointTrainer():
             pred, gold, hyp = model(src, src_lengths, trg, verbose=False)
         else:
             enc_output = model.encode(src, src_lengths)
-            accent_pred = discriminator(enc_output)
+            accent_pred = discriminator(torch.sum(enc_output, dim=1))
+            # calculate discriminator loss and encoder loss
+            disc_loss, _ = calculate_adversarial(accent_pred, accent_id)
+
+            # update disc
+
+            enc_output = model.encode(src, src_lengths)
+            accent_pred = discriminator(torch.sum(enc_output, dim=1))
             pred, gold, hyp = model.decode(enc_output, src_lengths, trg)
             # calculate discriminator loss and encoder loss
-            disc_loss, enc_loss = calculate_adversarial(accent_pred, accent_id)
+            _, enc_loss = calculate_adversarial(accent_pred, accent_id)
+
+            # update model
 
         strs_golds, strs_hyps = [], []
 
@@ -145,6 +154,8 @@ class JointTrainer():
                         args=([train_data_list, k_train, 1, train_data_buffer]))
         prefetch.start()
         
+        beta = 1
+        beta_decay = 0.99997
         it = start_it
         while it < num_it:
              # Wait until the next batch data is ready
@@ -159,12 +170,13 @@ class JointTrainer():
             batch_loss = 0
             total_loss, total_cer = 0, 0
             total_char = 0
-            if discriminator is not None:
-                total_disc_loss, total_enc_loss = 0, 0
+            total_disc_loss, total_enc_loss = 0, 0
+            
             # Local variables
             tr_inputs, tr_input_sizes, tr_percentages, tr_targets, tr_target_sizes  = None, None, None, None, None
             val_inputs, val_input_sizes, val_percentages, val_targets, val_target_sizes = None, None, None, None, None
             tr_loss, val_loss = None, None
+            disc_loss, enc_loss = None, None
             
             try:
                 # Start execution time
@@ -172,6 +184,8 @@ class JointTrainer():
 
                 # Reinit outer opt
                 opt.zero_grad()
+                if discriminator is not None:
+                    opt_disc.zero_grad()
                 if is_copy_grad:
                     model.zero_copy_grad() # initialize copy_grad with 0
 
@@ -205,33 +219,46 @@ class JointTrainer():
 
                     # Delete unused references
                     del tr_inputs, tr_input_sizes, tr_percentages, tr_targets, tr_target_sizes, tr_data
-                                        
-                    # outer loop optimization
-                    tr_loss = tr_loss / len(train_data_list)
-                    tr_loss.backward()
-                    
-                    # batch_loss += val_loss
+
                     total_loss += tr_loss.item()
+
+                    tr_loss = tr_loss / len(train_data_list)
+                    # adversarial training
+                    if discriminator is not None:
+                        if args.beta_decay:
+                            beta = beta * beta_decay
+                            disc_loss = beta * disc_loss
+                        else:
+                            disc_loss = 0.5 * disc_loss
+
+                        total_disc_loss += disc_loss.item()
+                        total_enc_loss += enc_loss.item()
+
+                        disc_loss = disc_loss / len(train_data_list)
+                        enc_loss = enc_loss / len(train_data_list)
+                        
+                        tr_loss = tr_loss + disc_loss + enc_loss
+                        # tr_loss.backward(retain_graph=True)
+                        # disc_loss.backward(retain_graph=True)
+                        # enc_loss.backward(retain_graph=True)
+                        tr_loss.backward()
+
+                        del disc_loss, enc_loss
+                    else:
+                        # outer loop optimization
+                        tr_loss.backward()
 
                     # Delete unused references
                     del tr_loss
 
-                    # adversarial training
-                    if discriminator is not None:
-                        if it % 2 == 0:
-                            disc_loss.backward()
-                            total_disc_loss += disc_loss.item()
-                        else:
-                            enc_loss.backward()
-                            total_enc_loss += enc_loss.item()
-                        
-                        del disc_loss
-                        del enc_loss
+                    # batch_loss += val_loss
                     
                 # Outer loop optimization                
                 if args.clip:
                     torch.nn.utils.clip_grad_norm_(model.parameters(), args.max_norm)
                 opt.step()
+                if discriminator is not None:
+                    opt_disc.step()
 
                 # Record performance
                 last_sum_cer.append(total_cer)
@@ -252,7 +279,7 @@ class JointTrainer():
                     print("(Iteration {}) TRAIN LOSS:{:.4f} DISC LOSS:{:.4f} ENC LOSS:{:.4f} CER:{:.2f}% LR:{:.7f} TOTAL TIME:{:.7f}".format(
                         (it+1), total_loss/len(train_data_list), total_disc_loss/len(train_data_list), total_enc_loss/len(train_data_list), total_cer*100/total_char, self.get_lr(opt), total_time))         
                     logging.info("(Iteration {}) TRAIN LOSS:{:.4f} DISC LOSS:{:.4f} ENC LOSS:{:.4f} CER:{:.2f}% LR:{:.7f} TOTAL TIME:{:.7f}".format(
-                        (it+1), total_loss/len(train_data_list), total_loss/len(train_data_list), total_disc_loss/len(train_data_list), total_cer*100/total_char, self.get_lr(opt), total_time))
+                        (it+1), total_loss/len(train_data_list), total_disc_loss/len(train_data_list), total_enc_loss/len(train_data_list), total_cer*100/total_char, self.get_lr(opt), total_time))
 
                 if (it + 1) % last_summary_every == 0:
                     print("(Summary Iteration {} | MA {}) TRAIN LOSS:{:.4f} CER:{:.2f}%".format(
@@ -312,6 +339,8 @@ class JointTrainer():
 
                     if (it+1) % args.save_every == 0:
                         save_joint_model(model, vocab, (it+1), opt, metrics, args, best_model=False)
+                        if discriminator is not None:
+                            save_discriminator(discriminator, (it+1), opt_disc, args, best_model=False)
 
                     # save the best model
                     early_stop_criteria, early_stop_val
@@ -321,6 +350,8 @@ class JointTrainer():
                             count_stop = 0
                             best_valid_val = avg_valid_cer
                             save_joint_model(model, vocab, (it+1), opt, metrics, args, best_model=True)
+                            if discriminator is not None:
+                                save_discriminator(discriminator, (it+1), opt_disc, args, best_model=True)
                         else:
                             print("count_stop:", count_stop)
                             count_stop += 1
@@ -351,5 +382,6 @@ class JointTrainer():
                 val_inputs, val_input_sizes, val_percentages, val_targets, val_target_sizes = None, None, None, None, None  
                 tr_loss, val_loss = None, None
                 batch_loss = None
+                disc_loss, enc_loss = None, None
         
                 torch.cuda.empty_cache()

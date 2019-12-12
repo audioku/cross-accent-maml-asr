@@ -70,6 +70,34 @@ def save_joint_model(model, vocab, epoch, opt, metrics, args, best_model=False):
         logging.info("Loss is not defined")
     torch.save(args, save_path)
 
+def save_discriminator(discriminator, epoch, opt, args, best_model=False):
+    """
+    Saving discriminator
+    """
+    if best_model:
+        save_path = "{}/{}/best_discriminator.th".format(
+            args.save_folder, args.name)
+    else:
+        save_path = "{}/{}/epoch_{}.th".format(args.save_folder,
+                                               args.name, epoch)
+
+    if not os.path.exists(args.save_folder + "/" + args.name):
+        os.makedirs(args.save_folder + "/" + args.name)
+    
+    print("SAVE DISCRIMINATOR to", save_path)
+    logging.info("SAVE DISCRIMINATOR to " + save_path)
+    if args.loss == "ce":
+        args = {
+            'args': args,
+            'epoch': epoch,
+            'model_state_dict': discriminator.state_dict(),
+            'opt': opt
+        }
+    else:
+        print("Loss is not defined")
+        logging.info("Loss is not defined")
+    torch.save(args, save_path)
+
 def save_meta_model(model, vocab, epoch, inner_opt, outer_opt, metrics, args, best_model=False):
     """
     Saving model, TODO adding history
@@ -243,6 +271,30 @@ def load_model(load_path, train=True):
 
     return model, vocab, opt, epoch, metrics, args
 
+def load_discriminator(load_path, train=True):
+    """
+    Loading discriminator
+    args:
+        load_path: string
+    """
+    checkpoint = torch.load(load_path, map_location=torch.device('cpu'))
+
+    epoch = checkpoint['epoch']
+    if 'args' in checkpoint:
+        args = checkpoint['args']
+
+    discriminator = init_discriminator_model(args)
+    discriminator.load_state_dict(checkpoint['model_state_dict'])
+    if args.cuda:
+        print("CUDA")
+        discriminator = discriminator.cuda()
+    else:
+        discriminator = discriminator.cpu()
+
+    opt = torch.optim.Adam(discriminator.parameters(), lr=args.lr)
+    opt.load_state_dict(checkpoint['opt'].state_dict())
+
+    return discriminator, opt
 
 def init_optimizer(args, model, opt_type="noam"):
     dim_input = args.dim_input

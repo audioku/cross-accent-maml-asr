@@ -10,9 +10,9 @@ from copy import deepcopy
 from tqdm import tqdm
 # from utils import constant
 from collections import deque
-from utils.functions import save_meta_model, post_process
+from utils.functions import save_meta_model, save_discriminator, post_process
 from utils.optimizer import NoamOpt
-from utils.metrics import calculate_metrics, calculate_cer, calculate_wer
+from utils.metrics import calculate_metrics, calculate_cer, calculate_wer, calculate_adversarial
 from torch.autograd import Variable
 
 class MetaTrainer():
@@ -22,8 +22,16 @@ class MetaTrainer():
     def __init__(self):
         logging.info("Meta Trainer is initialized")
 
-    def forward_one_batch(self, model, vocab, src, trg, src_percentages, src_lengths, trg_lengths, smoothing, loss_type, verbose=False):
-        pred, gold, hyp = model(src, src_lengths, trg, verbose=False)
+    def forward_one_batch(self, model, vocab, src, trg, src_percentages, src_lengths, trg_lengths, smoothing, loss_type, verbose=False, discriminator=None, accent_id=None):
+        if discriminator is None:
+            pred, gold, hyp = model(src, src_lengths, trg, verbose=False)
+        else:
+            enc_output = model.encode(src, src_lengths)
+            accent_pred = discriminator(torch.sum(enc_output, dim=1))
+            pred, gold, hyp = model.decode(enc_output, src_lengths, trg)
+            # calculate discriminator loss and encoder loss
+            disc_loss, enc_loss = calculate_adversarial(accent_pred, accent_id)
+
         strs_golds, strs_hyps = [], []
 
         for j in range(len(gold)):
@@ -70,13 +78,16 @@ class MetaTrainer():
             print("PRED:", strs_hyps)
             print("GOLD:", strs_golds, flush=True)
 
-        return loss, total_cer, total_char
+        if discriminator is None:
+            return loss, total_cer, total_char
+        else:
+            return loss, total_cer, total_char, disc_loss, enc_loss
 
     def get_lr(self, optimizer):
         for param_group in optimizer.param_groups:
             return param_group['lr']
 
-    def train(self, model, vocab, train_data_list, valid_data_list, loss_type, start_it, num_it, args, inner_opt=None, outer_opt=None, evaluate_every=1000, window_size=100, last_summary_every=1000, last_metrics=None, early_stop=10, cpu_state_dict=False, is_copy_grad=False):
+    def train(self, model, vocab, train_data_list, valid_data_list, loss_type, start_it, num_it, args, inner_opt=None, outer_opt=None, evaluate_every=1000, window_size=100, last_summary_every=1000, last_metrics=None, early_stop=10, cpu_state_dict=False, is_copy_grad=False, discriminator=None):
         """
         Training
         args:
@@ -110,6 +121,9 @@ class MetaTrainer():
         if outer_opt is None:
             outer_opt = torch.optim.Adam(model.parameters(), lr=args.meta_lr)
 
+        if discriminator is not None:
+            disc_opt = torch.optim.Adam(discriminator.parameters(), lr=args.lr)
+
         last_sum_loss = deque(maxlen=window_size)
         last_sum_cer = deque(maxlen=window_size)
         last_sum_char = deque(maxlen=window_size)
@@ -130,6 +144,8 @@ class MetaTrainer():
                         args=([train_data_list, k_train, k_valid, train_data_buffer]))
         prefetch.start()
         
+        beta = 1
+        beta_decay = 0.99997
         it = start_it
         while it < num_it:
             # Wait until the next batch data is ready
@@ -144,10 +160,15 @@ class MetaTrainer():
             batch_loss = 0
             total_loss, total_cer = 0, 0
             total_char = 0
+            total_disc_loss, total_enc_loss = 0, 0
                 
             # Local variables
             weights_original = None
             train_tmp_buffer = None
+            tr_inputs, tr_input_sizes, tr_percentages, tr_targets, tr_target_sizes  = None, None, None, None, None
+            val_inputs, val_input_sizes, val_percentages, val_targets, val_target_sizes = None, None, None, None, None
+            tr_loss, val_loss = None, None
+            disc_loss, enc_loss = None, None
                         
             try:
                 # Start execution time
@@ -163,9 +184,14 @@ class MetaTrainer():
 
                 # Reinit outer opt
                 outer_opt.zero_grad()
+                if discriminator is not None:
+                    disc_opt.zero_grad()
+
                 if is_copy_grad:
                     model.zero_copy_grad() # initialize copy_grad with 0
-                    
+                    if discriminator is not None:
+                        discriminator.zero_copy_grad()
+
                 # Pop buffer for all manifest first
                 # so we can maintain the same number in the buffer list if exception occur
                 train_tmp_buffer = []
@@ -196,6 +222,7 @@ class MetaTrainer():
 
                     # Inner Backward
                     inner_opt.zero_grad()
+                    tr_loss = tr_loss / len(train_data_list)
                     tr_loss.backward()
                     
                     # Delete unused references
@@ -208,30 +235,47 @@ class MetaTrainer():
 
                     # Move validation to cuda
                     if args.cuda:
-                        val_cuda_inputs = val_inputs.cuda()
-                        val_cuda_targets = val_targets.cuda()
+                        val_inputs = val_inputs.cuda()
+                        val_targets = val_targets.cuda()
 
-                    # Meta Validation 
-                    val_loss, val_cer, val_num_char = self.forward_one_batch(model, vocab, val_cuda_inputs, val_cuda_targets, val_percentages, val_input_sizes, val_target_sizes, smoothing, loss_type)
+                    # Meta Validation
+                    if discriminator is None:
+                        val_loss, val_cer, val_num_char = self.forward_one_batch(model, vocab, val_inputs, val_targets, val_percentages, val_input_sizes, val_target_sizes, smoothing, loss_type)
+                    else:
+                        val_loss, val_cer, val_num_char, disc_loss, enc_loss = self.forward_one_batch(model, vocab, val_inputs, val_targets, val_percentages, val_input_sizes, val_target_sizes, smoothing, loss_type, discriminator=discriminator, accent_id=manifest_id)
+
+                    # Delete unused references
+                    del val_inputs, val_input_sizes, val_percentages, val_targets, val_target_sizes, val_data
 
                     # batch_loss += val_loss
                     total_loss += val_loss.item()
-                    
-                    # Delete unused references
-                    del val_inputs, val_input_sizes, val_percentages, val_targets, val_target_sizes, val_data
-                    del val_cuda_inputs, val_cuda_targets
+
+                    # adversarial training
+                    if discriminator is not None:
+                        if args.beta_decay:
+                            beta = beta * beta_decay
+                            disc_loss = beta * disc_loss
+                        else:
+                            disc_loss = 0.5 * disc_loss
+                        total_disc_loss += disc_loss.item()
+                        total_enc_loss += enc_loss.item()
+
+                        val_loss = val_loss + enc_loss + disc_loss
                     
                     # outer loop optimization
                     if is_copy_grad:
                         val_loss = val_loss / len(train_data_list)
                         val_loss.backward()
-
+                        
                         model.add_copy_grad() # add model grad to copy grad
+
+                        if discriminator is not None:
+                            discriminator.add_copy_grad()  # add discriminator grad to copy grad
                     else:
                         batch_loss += val_loss / len(train_data_list)
 
                     # Delete unused references
-                    del val_loss
+                    del val_loss, enc_loss, disc_loss
                     
                     # Reset Weight
                     model.load_state_dict(weights_original)
@@ -242,6 +286,12 @@ class MetaTrainer():
                 # Outer loop optimization
                 if is_copy_grad:
                     model.from_copy_grad() # copy grad from copy_grad to model
+
+                    if discriminator is not None: # copy grad from copy_grad to discriminator
+                        discriminator.from_copy_grad()
+                        if args.clip:
+                            torch.nn.utils.clip_grad_norm_(discriminator.parameters(), args.max_norm)
+                        disc_opt.step()
                 else:
                     batch_loss.backward()
                     del batch_loss
@@ -249,7 +299,6 @@ class MetaTrainer():
                 if args.clip:
                     torch.nn.utils.clip_grad_norm_(model.parameters(), args.max_norm)
                 outer_opt.step()
-
                 
                 # Record performance
                 last_sum_cer.append(total_cer)
@@ -261,10 +310,16 @@ class MetaTrainer():
                 diff_time = end_time - start_time
                 total_time += diff_time
 
-                print("(Iteration {}) TRAIN LOSS:{:.4f} CER:{:.2f}% LR:{:.7f} TOTAL TIME:{:.7f}".format(
-                    (it+1), total_loss/len(train_data_list), total_cer*100/total_char, self.get_lr(outer_opt), total_time))         
-                logging.info("(Iteration {}) TRAIN LOSS:{:.4f} CER:{:.2f}% LR:{:.7f} TOTAL TIME:{:.7f}".format(
+                if discriminator is None:
+                    print("(Iteration {}) TRAIN LOSS:{:.4f} CER:{:.2f}% LR:{:.7f} TOTAL TIME:{:.7f}".format(
+                        (it+1), total_loss/len(train_data_list), total_cer*100/total_char, self.get_lr(outer_opt), total_time))         
+                    logging.info("(Iteration {}) TRAIN LOSS:{:.4f} CER:{:.2f}% LR:{:.7f} TOTAL TIME:{:.7f}".format(
                     (it+1), total_loss/len(train_data_list), total_cer*100/total_char, self.get_lr(outer_opt), total_time))
+                else:
+                    print("(Iteration {}) TRAIN LOSS:{:.4f} DISC LOSS:{:.4f} ENC LOSS:{:.4f} CER:{:.2f}% LR:{:.7f} TOTAL TIME:{:.7f}".format(
+                        (it+1), total_loss/len(train_data_list), total_disc_loss/len(train_data_list), total_enc_loss/len(train_data_list), total_cer*100/total_char, self.get_lr(outer_opt), total_time))         
+                    logging.info("(Iteration {}) TRAIN LOSS:{:.4f} DISC LOSS:{:.4f} ENC LOSS:{:.4f} CER:{:.2f}% LR:{:.7f} TOTAL TIME:{:.7f}".format(
+                    (it+1), total_loss/len(train_data_list), total_disc_loss/len(train_data_list), total_enc_loss/len(train_data_list), total_cer*100/total_char, self.get_lr(outer_opt), total_time))
 
                 if (it + 1) % last_summary_every == 0:
                     print("(Summary Iteration {} | MA {}) TRAIN LOSS:{:.4f} CER:{:.2f}%".format(
@@ -281,32 +336,30 @@ class MetaTrainer():
                     valid_data_buffer = [[] for manifest_id in range(len(valid_data_list))]
 
                     # Buffer for accumulating loss
-                    valid_batch_loss = 0
-                    valid_total_loss, valid_total_cer = 0, 0
-                    valid_total_char = 0
+                    valid_total_loss, valid_total_cer, valid_total_char = 0, 0, 0
 
-                    valid_last_sum_loss = deque(maxlen=window_size)
-                    valid_last_sum_cer = deque(maxlen=window_size)
-                    valid_last_sum_char = deque(maxlen=window_size)
+                    valid_last_sum_loss = deque(maxlen=num_valid_it)
+                    valid_last_sum_cer = deque(maxlen=num_valid_it)
+                    valid_last_sum_char = deque(maxlen=num_valid_it)
                         
                     # Local variables
                     weights_original = None
                     valid_tmp_buffer = None
 
                     # Parallelly fetch next batch data from all manifest
-                    prefetch = threading.Thread(target=fetch_train_batch, 
+                    prefetch_val = threading.Thread(target=fetch_train_batch, 
                                     args=([valid_data_list, k_train, k_valid, valid_data_buffer]))
-                    prefetch.start()
+                    prefetch_val.start()
 
                     valid_it = 0
                     while valid_it < num_valid_it:
                         # Wait until the next batch data is ready
-                        prefetch.join()
+                        prefetch_val.join()
                         
                         # Parallelly fetch next batch data from all manifest
-                        prefetch = threading.Thread(target=fetch_train_batch, 
+                        prefetch_val = threading.Thread(target=fetch_train_batch, 
                                         args=([valid_data_list, k_train, k_valid, valid_data_buffer]))
-                        prefetch.start()
+                        prefetch_val.start()
 
                         # Start execution time
                         start_time = time.time()
@@ -337,6 +390,7 @@ class MetaTrainer():
                             tr_data, val_data = valid_tmp_buffer.pop()
                             tr_inputs, tr_input_sizes, tr_percentages, tr_targets, tr_target_sizes = tr_data
                             val_inputs, val_input_sizes, val_percentages, val_targets, val_target_sizes = val_data
+                            
                             if args.cuda:
                                 tr_inputs = tr_inputs.cuda()
                                 tr_targets = tr_targets.cuda()
@@ -346,8 +400,8 @@ class MetaTrainer():
                             tr_loss, tr_cer, tr_num_char = self.forward_one_batch(model, vocab, tr_inputs, tr_targets, tr_percentages, tr_input_sizes, tr_target_sizes, smoothing, loss_type, verbose=False)
 
                             # Update train evaluation metric                    
-                            valid_total_cer += tr_cer
-                            valid_total_char += tr_num_char
+                            valid_total_cer += tr_cer # HERE?
+                            valid_total_char += tr_num_char # HERE?
 
                             # Delete unused references
                             del tr_inputs, tr_input_sizes, tr_percentages, tr_targets, tr_target_sizes, tr_data
@@ -366,24 +420,27 @@ class MetaTrainer():
 
                             # Move validation to cuda
                             if args.cuda:
-                                val_cuda_inputs = val_inputs.cuda()
-                                val_cuda_targets = val_targets.cuda()
+                                val_inputs = val_inputs.cuda()
+                                val_targets = val_targets.cuda()
 
                             # Meta Validation
                             model.eval()
                             with torch.no_grad():
-                                val_loss, val_cer, val_num_char = self.forward_one_batch(model, vocab, val_cuda_inputs, val_cuda_targets, val_percentages, val_input_sizes, val_target_sizes, smoothing, loss_type)
+                                val_loss, val_cer, val_num_char = self.forward_one_batch(model, vocab, val_inputs, val_targets, val_percentages, val_input_sizes, val_target_sizes, smoothing, loss_type)
 
                             # batch_loss += val_loss
                             valid_total_loss += val_loss.item()
                             
                             # Delete unused references
                             del val_inputs, val_input_sizes, val_percentages, val_targets, val_target_sizes, val_data
-                            del val_cuda_inputs, val_cuda_targets
+                            del val_loss
                             
                             # Reset Weight
                             model.load_state_dict(weights_original)
 
+                        # Delete copy weight
+                        weights_original = None
+                        
                         # Record performance
                         valid_last_sum_cer.append(valid_total_cer)
                         valid_last_sum_char.append(valid_total_char)
@@ -410,6 +467,8 @@ class MetaTrainer():
 
                     if (it+1) % args.save_every == 0:
                         save_meta_model(model, vocab, (it+1), inner_opt, outer_opt, metrics, args, best_model=False)
+                        if discriminator is not None:
+                            save_discriminator(discriminator, (it+1), disc_opt, args, best_model=False)
 
                     # save the best model
                     early_stop_criteria, early_stop_val
@@ -419,6 +478,8 @@ class MetaTrainer():
                             count_stop = 0
                             best_valid_val = avg_valid_cer
                             save_meta_model(model, vocab, (it+1), inner_opt, outer_opt, metrics, args, best_model=True)
+                            if discriminator is not None:
+                                save_discriminator(discriminator, (it+1), disc_opt, args, best_model=True)
                         else:
                             print("count_stop:", count_stop)
                             count_stop += 1
@@ -447,8 +508,8 @@ class MetaTrainer():
 
                 tr_inputs, tr_input_sizes, tr_percentages, tr_targets, tr_target_sizes = None, None, None, None, None
                 val_inputs, val_input_sizes, val_percentages, val_targets, val_target_sizes = None, None, None, None, None       
-                val_cuda_inputs, val_cuda_targets = None, None
                 tr_loss, val_loss = None, None
+                disc_loss, enc_loss = None, None
                 weights_original = None
                 batch_loss = 0
         
