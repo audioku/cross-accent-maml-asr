@@ -218,6 +218,7 @@ class TransientTrainer():
                     total_loss += val_loss.item()
                     
                     # Delete unused references
+                    del val_inputs, val_input_sizes, val_percentages, val_targets, val_target_sizes, val_data
                     del val_cuda_inputs, val_cuda_targets
                     
                     # outer loop optimization
@@ -234,9 +235,6 @@ class TransientTrainer():
                     
                     # Reset Weight
                     model.load_state_dict(weights_original)
-                
-                # Delete unused references
-                del val_inputs, val_input_sizes, val_percentages, val_targets, val_target_sizes, val_data
                 
                 # Delete copy weight
                 weights_original = None

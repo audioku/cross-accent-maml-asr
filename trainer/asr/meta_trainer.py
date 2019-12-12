@@ -160,12 +160,15 @@ class MetaTrainer():
             batch_loss = 0
             total_loss, total_cer = 0, 0
             total_char = 0
-            if discriminator is not None:
-                total_disc_loss, total_enc_loss = 0, 0
+            total_disc_loss, total_enc_loss = 0, 0
                 
             # Local variables
             weights_original = None
             train_tmp_buffer = None
+            tr_inputs, tr_input_sizes, tr_percentages, tr_targets, tr_target_sizes  = None, None, None, None, None
+            val_inputs, val_input_sizes, val_percentages, val_targets, val_target_sizes = None, None, None, None, None
+            tr_loss, val_loss = None, None
+            disc_loss, enc_loss = None, None
                         
             try:
                 # Start execution time
@@ -232,18 +235,17 @@ class MetaTrainer():
 
                     # Move validation to cuda
                     if args.cuda:
-                        val_cuda_inputs = val_inputs.cuda()
-                        val_cuda_targets = val_targets.cuda()
+                        val_inputs = val_inputs.cuda()
+                        val_targets = val_targets.cuda()
 
                     # Meta Validation
                     if discriminator is None:
-                        val_loss, val_cer, val_num_char = self.forward_one_batch(model, vocab, val_cuda_inputs, val_cuda_targets, val_percentages, val_input_sizes, val_target_sizes, smoothing, loss_type)
+                        val_loss, val_cer, val_num_char = self.forward_one_batch(model, vocab, val_inputs, val_targets, val_percentages, val_input_sizes, val_target_sizes, smoothing, loss_type)
                     else:
-                        val_loss, val_cer, val_num_char, disc_loss, enc_loss = self.forward_one_batch(model, vocab, val_cuda_inputs, val_cuda_targets, val_percentages, val_input_sizes, val_target_sizes, smoothing, loss_type, discriminator=discriminator, accent_id=manifest_id)
+                        val_loss, val_cer, val_num_char, disc_loss, enc_loss = self.forward_one_batch(model, vocab, val_inputs, val_targets, val_percentages, val_input_sizes, val_target_sizes, smoothing, loss_type, discriminator=discriminator, accent_id=manifest_id)
 
                     # Delete unused references
                     del val_inputs, val_input_sizes, val_percentages, val_targets, val_target_sizes, val_data
-                    del val_cuda_inputs, val_cuda_targets
 
                     # batch_loss += val_loss
                     total_loss += val_loss.item()
@@ -258,8 +260,6 @@ class MetaTrainer():
                         total_disc_loss += disc_loss.item()
                         total_enc_loss += enc_loss.item()
 
-                        disc_loss = disc_loss / len(train_data_list)
-                        enc_loss = enc_loss / len(train_data_list)
                         val_loss = val_loss + enc_loss + disc_loss
                     
                     # outer loop optimization
@@ -275,9 +275,7 @@ class MetaTrainer():
                         batch_loss += val_loss / len(train_data_list)
 
                     # Delete unused references
-                    del val_loss
-                    if discriminator is not None:
-                        del enc_loss, disc_loss
+                    del val_loss, enc_loss, disc_loss
                     
                     # Reset Weight
                     model.load_state_dict(weights_original)
@@ -291,6 +289,8 @@ class MetaTrainer():
 
                     if discriminator is not None: # copy grad from copy_grad to discriminator
                         discriminator.from_copy_grad()
+                        if args.clip:
+                            torch.nn.utils.clip_grad_norm_(discriminator.parameters(), args.max_norm)
                         disc_opt.step()
                 else:
                     batch_loss.backward()
@@ -336,32 +336,30 @@ class MetaTrainer():
                     valid_data_buffer = [[] for manifest_id in range(len(valid_data_list))]
 
                     # Buffer for accumulating loss
-                    valid_batch_loss = 0
-                    valid_total_loss, valid_total_cer = 0, 0
-                    valid_total_char = 0
+                    valid_total_loss, valid_total_cer, valid_total_char = 0, 0, 0
 
-                    valid_last_sum_loss = deque(maxlen=window_size)
-                    valid_last_sum_cer = deque(maxlen=window_size)
-                    valid_last_sum_char = deque(maxlen=window_size)
+                    valid_last_sum_loss = deque(maxlen=num_valid_it)
+                    valid_last_sum_cer = deque(maxlen=num_valid_it)
+                    valid_last_sum_char = deque(maxlen=num_valid_it)
                         
                     # Local variables
                     weights_original = None
                     valid_tmp_buffer = None
 
                     # Parallelly fetch next batch data from all manifest
-                    prefetch = threading.Thread(target=fetch_train_batch, 
+                    prefetch_val = threading.Thread(target=fetch_train_batch, 
                                     args=([valid_data_list, k_train, k_valid, valid_data_buffer]))
-                    prefetch.start()
+                    prefetch_val.start()
 
                     valid_it = 0
                     while valid_it < num_valid_it:
                         # Wait until the next batch data is ready
-                        prefetch.join()
+                        prefetch_val.join()
                         
                         # Parallelly fetch next batch data from all manifest
-                        prefetch = threading.Thread(target=fetch_train_batch, 
+                        prefetch_val = threading.Thread(target=fetch_train_batch, 
                                         args=([valid_data_list, k_train, k_valid, valid_data_buffer]))
-                        prefetch.start()
+                        prefetch_val.start()
 
                         # Start execution time
                         start_time = time.time()
@@ -392,6 +390,7 @@ class MetaTrainer():
                             tr_data, val_data = valid_tmp_buffer.pop()
                             tr_inputs, tr_input_sizes, tr_percentages, tr_targets, tr_target_sizes = tr_data
                             val_inputs, val_input_sizes, val_percentages, val_targets, val_target_sizes = val_data
+                            
                             if args.cuda:
                                 tr_inputs = tr_inputs.cuda()
                                 tr_targets = tr_targets.cuda()
@@ -401,8 +400,8 @@ class MetaTrainer():
                             tr_loss, tr_cer, tr_num_char = self.forward_one_batch(model, vocab, tr_inputs, tr_targets, tr_percentages, tr_input_sizes, tr_target_sizes, smoothing, loss_type, verbose=False)
 
                             # Update train evaluation metric                    
-                            valid_total_cer += tr_cer
-                            valid_total_char += tr_num_char
+                            valid_total_cer += tr_cer # HERE?
+                            valid_total_char += tr_num_char # HERE?
 
                             # Delete unused references
                             del tr_inputs, tr_input_sizes, tr_percentages, tr_targets, tr_target_sizes, tr_data
@@ -421,24 +420,27 @@ class MetaTrainer():
 
                             # Move validation to cuda
                             if args.cuda:
-                                val_cuda_inputs = val_inputs.cuda()
-                                val_cuda_targets = val_targets.cuda()
+                                val_inputs = val_inputs.cuda()
+                                val_targets = val_targets.cuda()
 
                             # Meta Validation
                             model.eval()
                             with torch.no_grad():
-                                val_loss, val_cer, val_num_char = self.forward_one_batch(model, vocab, val_cuda_inputs, val_cuda_targets, val_percentages, val_input_sizes, val_target_sizes, smoothing, loss_type)
+                                val_loss, val_cer, val_num_char = self.forward_one_batch(model, vocab, val_inputs, val_targets, val_percentages, val_input_sizes, val_target_sizes, smoothing, loss_type)
 
                             # batch_loss += val_loss
                             valid_total_loss += val_loss.item()
                             
                             # Delete unused references
                             del val_inputs, val_input_sizes, val_percentages, val_targets, val_target_sizes, val_data
-                            del val_cuda_inputs, val_cuda_targets
+                            del val_loss
                             
                             # Reset Weight
                             model.load_state_dict(weights_original)
 
+                        # Delete copy weight
+                        weights_original = None
+                        
                         # Record performance
                         valid_last_sum_cer.append(valid_total_cer)
                         valid_last_sum_char.append(valid_total_char)
@@ -505,12 +507,9 @@ class MetaTrainer():
 
                 tr_inputs, tr_input_sizes, tr_percentages, tr_targets, tr_target_sizes = None, None, None, None, None
                 val_inputs, val_input_sizes, val_percentages, val_targets, val_target_sizes = None, None, None, None, None       
-                val_cuda_inputs, val_cuda_targets = None, None
                 tr_loss, val_loss = None, None
+                disc_loss, enc_loss = None, None
                 weights_original = None
                 batch_loss = 0
-                
-                if discriminator is not None:
-                    disc_loss, enc_loss = None, None
         
                 torch.cuda.empty_cache()
