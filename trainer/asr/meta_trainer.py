@@ -393,11 +393,12 @@ class MetaTrainer():
                         end_time = time.time()
                         diff_time = end_time - start_time
                         total_time += diff_time
+                        valid_it += 1
 
-                    print("(Iteration {}) VALID LOSS:{:.4f} CER:{:.2f}%".format(
-                        (it+1), sum(valid_last_sum_loss)/len(valid_last_sum_loss), sum(valid_last_sum_cer)*100/sum(valid_last_sum_char)), flush=True)
-                    logging.info("(Iteration {}) VALID LOSS:{:.4f} CER:{:.2f}%".format(
-                        (it+1), sum(valid_last_sum_loss)/len(valid_last_sum_loss), sum(valid_last_sum_cer)*100/sum(valid_last_sum_char)))
+                    print("(Summary Iteration {}) VALID LOSS:{:.4f} CER:{:.2f}% TOTAL TIME:{:.7f}".format(
+                        (it+1), sum(valid_last_sum_loss)/len(valid_last_sum_loss), sum(valid_last_sum_cer)*100/sum(valid_last_sum_char), total_time), flush=True)
+                    logging.info("(Summary Iteration {}) VALID LOSS:{:.4f} CER:{:.2f}% TOTAL TIME:{:.7f}".format(
+                        (it+1), sum(valid_last_sum_loss)/len(valid_last_sum_loss), sum(valid_last_sum_cer)*100/sum(valid_last_sum_char), total_time))
 
                     metrics = {}
                     avg_valid_loss = sum(valid_last_sum_loss)/len(valid_last_sum_loss)
