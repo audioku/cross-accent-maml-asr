@@ -234,19 +234,17 @@ class MetaTrainer():
 
                     # Move validation to cuda
                     if args.cuda:
-                        val_cuda_inputs = val_inputs.cuda()
-                        val_cuda_targets = val_targets.cuda()
+                        val_inputs = val_inputs.cuda()
+                        val_targets = val_targets.cuda()
 
                     # Meta Validation
                     if discriminator is None:
-                        val_loss, val_cer, val_num_char = self.forward_one_batch(model, vocab, val_cuda_inputs, val_cuda_targets, val_percentages, val_input_sizes, val_target_sizes, smoothing, loss_type)
+                        val_loss, val_cer, val_num_char = self.forward_one_batch(model, vocab, val_inputs, val_targets, val_percentages, val_input_sizes, val_target_sizes, smoothing, loss_type)
                     else:
-                        val_loss, val_cer, val_num_char, disc_loss, enc_loss = self.forward_one_batch(model, vocab, val_cuda_inputs, val_cuda_targets, val_percentages, val_input_sizes, val_target_sizes, smoothing, loss_type, discriminator=discriminator, accent_id=manifest_id)
+                        val_loss, val_cer, val_num_char, disc_loss, enc_loss = self.forward_one_batch(model, vocab, val_inputs, val_targets, val_percentages, val_input_sizes, val_target_sizes, smoothing, loss_type, discriminator=discriminator, accent_id=manifest_id)
 
                     # Delete unused references
                     del val_inputs, val_input_sizes, val_percentages, val_targets, val_target_sizes, val_data
-                    del val_cuda_inputs, val_cuda_targets
-
                     # batch_loss += val_loss
                     total_loss += val_loss.item()
 
@@ -421,21 +419,23 @@ class MetaTrainer():
 
                             # Move validation to cuda
                             if args.cuda:
-                                val_cuda_inputs = val_inputs.cuda()
-                                val_cuda_targets = val_targets.cuda()
+                                val_inputs = val_inputs.cuda()
+                                val_targets = val_targets.cuda()
 
                             # Meta Validation
                             model.eval()
                             with torch.no_grad():
-                                val_loss, val_cer, val_num_char = self.forward_one_batch(model, vocab, val_cuda_inputs, val_cuda_targets, val_percentages, val_input_sizes, val_target_sizes, smoothing, loss_type)
+                                val_loss, val_cer, val_num_char = self.forward_one_batch(model, vocab, val_inputs, val_targets, val_percentages, val_input_sizes, val_target_sizes, smoothing, loss_type)
 
-                            # batch_loss += val_loss
-                            valid_total_loss += val_loss.item()
+                            # Update train evaluation metric
+                            valid_total_loss += val_loss.item()                    
+                            valid_total_cer += tr_cer
+                            valid_total_char += tr_num_char
                             
                             # Delete unused references
                             del val_inputs, val_input_sizes, val_percentages, val_targets, val_target_sizes, val_data
-                            del val_cuda_inputs, val_cuda_targets
-                            
+                            del val_loss
+
                             # Reset Weight
                             model.load_state_dict(weights_original)
 
@@ -448,11 +448,12 @@ class MetaTrainer():
                         end_time = time.time()
                         diff_time = end_time - start_time
                         total_time += diff_time
+                        valid_it += 1
 
-                    print("(Iteration {}) VALID LOSS:{:.4f} CER:{:.2f}%".format(
-                        (it+1), sum(valid_last_sum_loss)/len(valid_last_sum_loss), sum(valid_last_sum_cer)*100/sum(valid_last_sum_char)), flush=True)
-                    logging.info("(Iteration {}) VALID LOSS:{:.4f} CER:{:.2f}%".format(
-                        (it+1), sum(valid_last_sum_loss)/len(valid_last_sum_loss), sum(valid_last_sum_cer)*100/sum(valid_last_sum_char)))
+                    print("(Summary Iteration {}) VALID LOSS:{:.4f} CER:{:.2f}% TOTAL TIME:{:.7f}".format(
+                        (it+1), sum(valid_last_sum_loss)/len(valid_last_sum_loss), sum(valid_last_sum_cer)*100/sum(valid_last_sum_char), total_time), flush=True)
+                    logging.info("(Summary Iteration {}) VALID LOSS:{:.4f} CER:{:.2f}% TOTAL TIME:{:.7f}".format(
+                        (it+1), sum(valid_last_sum_loss)/len(valid_last_sum_loss), sum(valid_last_sum_cer)*100/sum(valid_last_sum_char), total_time))
 
                     metrics = {}
                     avg_valid_loss = sum(valid_last_sum_loss)/len(valid_last_sum_loss)
