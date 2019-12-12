@@ -154,6 +154,8 @@ class JointTrainer():
                         args=([train_data_list, k_train, 1, train_data_buffer]))
         prefetch.start()
         
+        beta = 1
+        beta_decay = 0.99997
         it = start_it
         while it < num_it:
              # Wait until the next batch data is ready
@@ -175,8 +177,6 @@ class JointTrainer():
             val_inputs, val_input_sizes, val_percentages, val_targets, val_target_sizes = None, None, None, None, None
             tr_loss, val_loss = None, None
             
-            beta = 1
-            beta_decay = 0.99997
             try:
                 # Start execution time
                 start_time = time.time()
@@ -224,10 +224,12 @@ class JointTrainer():
                     tr_loss = tr_loss / len(train_data_list)
                     # adversarial training
                     if discriminator is not None:
-                        # disc_loss = 0.5 * disc_loss
-                        beta = beta * beta_decay
-                        disc_loss = beta * disc_loss
-                        
+                        if args.beta_decay:
+                            beta = beta * beta_decay
+                            disc_loss = beta * disc_loss
+                        else:
+                            disc_loss = 0.5 * disc_loss
+
                         total_disc_loss += disc_loss.item()
                         total_enc_loss += enc_loss.item()
 

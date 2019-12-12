@@ -118,6 +118,7 @@ parser.add_argument('--num_class', default=10, type=int, help="number of accents
 
 # Adversarial training
 parser.add_argument('--adversarial', action='store_true', help='adversarial training')
+parser.add_argument('--beta_decay', action='store_true', help='decrease the weight of discriminator')
 
 torch.manual_seed(123456)
 torch.cuda.manual_seed_all(123456)
