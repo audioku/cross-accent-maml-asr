@@ -182,5 +182,18 @@ def calculate_adversarial(pred, accent_id):
 
     return discriminator_loss, encoder_loss
 
-def calculate_multi_task(pred, gold):
-    pass
+def calculate_multi_task(pred, accent_id):
+    """
+    args:
+        pred: prediction for one batch (B x C)
+        accent_id: accent id for this batch (1)
+    output:
+        discriminator_loss
+    """
+    pred_size = pred.size()
+    gold_for_discriminator = torch.cuda.LongTensor(pred_size[0]).fill_(accent_id)
+
+    discriminator_loss = F.cross_entropy(pred, gold_for_discriminator)
+    # It should be unnecessary, but let's try
+    del gold_for_discriminator
+    return discriminator_loss

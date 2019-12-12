@@ -114,11 +114,11 @@ parser.add_argument('--finetune', action='store_true', help="")
 
 # Multi-Task
 parser.add_argument('--multitask', action='store_true', help='conduct multi-task training')
-parser.add_argument('--num_class', default=10, type=int, help="number of accents in the training")
+parser.add_argument('--num-class', default=10, type=int, help="number of accents in the training")
 
 # Adversarial training
 parser.add_argument('--adversarial', action='store_true', help='adversarial training')
-parser.add_argument('--beta_decay', action='store_true', help='decrease the weight of discriminator')
+parser.add_argument('--beta-decay', action='store_true', help='decrease the weight of discriminator')
 
 torch.manual_seed(123456)
 torch.cuda.manual_seed_all(123456)
@@ -195,14 +195,14 @@ if __name__ == '__main__':
         model, vocab, opt, epoch, metrics, loaded_args = load_joint_model(args.continue_from)
         start_epoch = (epoch)  # index starts from zero
         verbose = args.verbose
-        if args.adversarial:
+        if args.adversarial or args.multitask:
             discriminator, opt_disc = load_discriminator(args.continue_from)
         else:
             discriminator = None
     else:
         if args.model == "TRFS":
             model = init_transformer_model(args, vocab, is_factorized=args.is_factorized, r=args.r)
-            if args.adversarial:
+            if args.adversarial or args.multitask:
                 discriminator = init_discriminator_model(args)
             else:
                 discriminator = None
@@ -213,7 +213,7 @@ if __name__ == '__main__':
 
     if USE_CUDA:
         model = model.cuda()
-        if args.adversarial:
+        if args.adversarial or args.multitask:
             discriminator = discriminator.cuda()
 
     logging.info(model)
