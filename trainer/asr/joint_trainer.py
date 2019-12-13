@@ -123,11 +123,11 @@ class JointTrainer():
         if opt_name == "adam":
             opt = torch.optim.Adam(model.parameters(), lr=args.lr)
             if discriminator is not None:
-                opt_disc = torch.optim.Adam(discriminator.parameters(), lr=args.lr)
+                opt_disc = torch.optim.Adam(discriminator.parameters(), lr=args.lr_disc)
         elif opt_name == "sgd":
             opt = torch.optim.SGD(model.parameters(), lr=args.lr)
             if discriminator is not None:
-                opt_disc = torch.optim.SGD(discriminator.parameters(), lr=args.lr)
+                opt_disc = torch.optim.SGD(discriminator.parameters(), lr=args.lr_disc)
         else:
             opt = None
         # opt = NoamOpt(args.dim_model, args.k_lr, args.warmup, torch.optim.Adam(model.parameters(), betas=(0.9, 0.98), eps=1e-9), min_lr=args.min_lr)

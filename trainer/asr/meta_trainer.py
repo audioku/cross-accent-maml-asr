@@ -124,7 +124,7 @@ class MetaTrainer():
             outer_opt = torch.optim.Adam(model.parameters(), lr=args.meta_lr)
 
         if discriminator is not None:
-            disc_opt = torch.optim.Adam(discriminator.parameters(), lr=args.lr)
+            disc_opt = torch.optim.Adam(discriminator.parameters(), lr=args.lr_disc)
 
         last_sum_loss = deque(maxlen=window_size)
         last_sum_cer = deque(maxlen=window_size)
