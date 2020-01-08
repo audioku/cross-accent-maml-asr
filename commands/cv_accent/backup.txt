@@ -1,0 +1,19 @@
+--test-manifest-list ./data/manifests/cv_20190612_philippines.csv ./data/manifests/cv_20190612_wales.csv ./data/manifests/cv_20190612_bermuda.csv
+
+
+CUDA_VISIBLE_DEVICES=1 python3 test.py --cuda --test-manifest-list ./data/manifests/cv_20190612_philippines.csv --labels-path data/labels/cv_labels.json --continue-from save/maml_10_3_3_enc2_dec4_512_b6_22050hz_copy_grad_early10000/epoch_100000.th
+
+CUDA_VISIBLE_DEVICES=2 python3 test.py --cuda --test-manifest-list ./data/manifests/cv_20190612_philippines.csv --labels-path data/labels/cv_labels.json --continue-from save/joint_10_3_3_enc2_dec4_512_b6_22050hz/epoch_100000.th --training-mode joint
+
+CUDA_VISIBLE_DEVICES=1 python3 test.py --cuda --test-manifest-list ./data/manifests/cv_20190612_wales.csv --labels-path data/labels/cv_labels.json --continue-from save/maml_10_3_3_enc2_dec4_512_b6_22050hz_copy_grad_early10000/epoch_100000.th
+
+CUDA_VISIBLE_DEVICES=2 python3 test.py --cuda --test-manifest-list ./data/manifests/cv_20190612_wales.csv --labels-path data/labels/cv_labels.json --continue-from save/joint_10_3_3_enc2_dec4_512_b6_22050hz/epoch_100000.th --training-mode joint
+
+CUDA_VISIBLE_DEVICES=1 python3 test.py --cuda --test-manifest-list ./data/manifests/cv_20190612_bermuda.csv --labels-path data/labels/cv_labels.json --continue-from save/maml_10_3_3_enc2_dec4_512_b6_22050hz_copy_grad_early10000/epoch_100000.th
+
+CUDA_VISIBLE_DEVICES=2 python3 test.py --cuda --test-manifest-list ./data/manifests/cv_20190612_bermuda.csv --labels-path data/labels/cv_labels.json --continue-from save/joint_10_3_3_enc2_dec4_512_b6_22050hz/epoch_100000.th --training-mode joint
+
+
+CUDA_VISIBLE_DEVICES=1 python3 test.py --cuda --test-manifest-list ./data/manifests/cv_20190612_bermuda.csv --labels-path data/labels/cv_labels.json --continue-from save/maml_10_3_3_enc2_dec4_512_b6_22050hz_copy_grad_early10000/best_model.th
+
+CUDA_VISIBLE_DEVICES=2 python3 test.py --cuda --test-manifest-list ./data/manifests/cv_20190612_bermuda.csv --labels-path data/labels/cv_labels.json --continue-from save/joint_10_3_3_enc2_dec4_512_b6_22050hz/best_model.th --training-mode joint
