@@ -147,14 +147,7 @@ def save_model(model, vocab, epoch, opt, metrics, args, best_model=False):
             'args': args,
             'epoch': epoch,
             'model_state_dict': model.state_dict(),
-            'optimizer_state_dict': opt.optimizer.state_dict(),
-            'optimizer_params': {
-                '_step': opt._step,
-                '_rate': opt._rate,
-                'warmup': opt.warmup,
-                'factor': opt.factor,
-                'model_size': opt.model_size
-            },
+            'opt': opt,
             'metrics': metrics
         }
     else:

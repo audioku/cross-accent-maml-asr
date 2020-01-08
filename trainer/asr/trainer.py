@@ -18,6 +18,10 @@ class Trainer():
     def __init__(self):
         logging.info("Trainer is initialized")
 
+    def get_lr(self, optimizer):
+        for param_group in optimizer.param_groups:
+            return param_group['lr']
+
     def train_one_batch(self, model, vocab, src, trg, src_percentages, src_lengths, trg_lengths, smoothing, loss_type):
         pred, gold, hyp = model(src, src_lengths, trg, verbose=False)
         strs_golds, strs_hyps = [], []
@@ -57,14 +61,13 @@ class Trainer():
 
         return loss, total_cer, total_char
 
-    def train(self, model, vocab, train_loader, train_sampler, valid_loader_list, opt, loss_type, start_epoch, num_epochs, args, last_metrics=None, early_stop=10):
+    def train(self, model, vocab, train_loader, valid_loader_list, loss_type, start_epoch, num_epochs, args, evaluate_every=1000, last_metrics=None, early_stop=10, opt_name="adam"):
         """
         Training
         args:
             model: Model object
             train_loader: DataLoader object of the training set
             valid_loader_list: a list of Validation DataLoader objects
-            opt: Optimizer object
             start_epoch: start epoch (> 0 if you resume the process)
             num_epochs: last epoch
         """
@@ -75,6 +78,13 @@ class Trainer():
         count_stop = 0
 
         logging.info("name " +  args.name)
+
+        if opt_name == "adam":
+            opt = torch.optim.Adam(model.parameters(), lr=args.lr)
+        elif opt_name == "sgd":
+            opt = torch.optim.SGD(model.parameters(), lr=args.lr)
+        else:
+            opt = None
 
         for epoch in range(start_epoch, num_epochs):
             total_loss, total_cer, total_wer, total_char, total_word = 0, 0, 0, 0, 0
@@ -118,7 +128,7 @@ class Trainer():
                     total_time += diff_time
 
                     pbar.set_description("(Epoch {}) TRAIN LOSS:{:.4f} CER:{:.2f}% LR:{:.7f} TOTAL TIME:{:.7f}".format(
-                        (epoch+1), total_loss/(i+1), total_cer*100/total_char, opt._rate, total_time))
+                        (epoch+1), total_loss/(i+1), total_cer*100/total_char, self.get_lr(opt), total_time))
                 except Exception as e:
                     print(e)
                     # del loss
@@ -160,7 +170,7 @@ class Trainer():
                         print("probably OOM, autosplit batch. skip batch")
                         continue
 
-            pbar.set_description("(Epoch {}) TRAIN LOSS:{:.4f} CER:{:.2f}% LR:{:.7f} TOTAL TIME:{:.7f}".format((epoch+1), total_loss/(i+1), total_cer*100/total_char, opt._rate, total_time))
+            pbar.set_description("(Epoch {}) TRAIN LOSS:{:.4f} CER:{:.2f}% LR:{:.7f} TOTAL TIME:{:.7f}".format((epoch+1), total_loss/(i+1), total_cer*100/total_char, self.get_lr(opt), total_time))
 
             final_train_loss = total_loss/(len(train_loader))
             final_train_cer = total_cer*100/total_char
@@ -169,124 +179,124 @@ class Trainer():
             final_train_cers.append(final_train_cer)
 
             logging.info("(Epoch {}) TRAIN LOSS:{:.4f} CER:{:.2f}% LR:{:.7f}".format(
-                (epoch+1), final_train_loss, final_train_cer, opt._rate))
+                (epoch+1), final_train_loss, final_train_cer, self.get_lr(opt)))
 
             # evaluate
-            print("")
-            logging.info("VALID")
-            model.eval()
+            if (epoch + 1) % evaluate_every == 0:
+                print("")
+                logging.info("VALID")
+                model.eval()
 
-            final_valid_losses = []
-            final_valid_cers = []
-            for ind in range(len(valid_loader_list)):
-                valid_loader = valid_loader_list[ind]
+                final_valid_losses = []
+                final_valid_cers = []
+                for ind in range(len(valid_loader_list)):
+                    valid_loader = valid_loader_list[ind]
 
-                total_valid_loss, total_valid_cer, total_valid_wer, total_valid_char, total_valid_word = 0, 0, 0, 0, 0
-                valid_pbar = tqdm(iter(valid_loader), leave=True, total=len(valid_loader))
-                for i, (data) in enumerate(valid_pbar):
-                    torch.cuda.empty_cache()
+                    total_valid_loss, total_valid_cer, total_valid_wer, total_valid_char, total_valid_word = 0, 0, 0, 0, 0
+                    valid_pbar = tqdm(iter(valid_loader), leave=True, total=len(valid_loader))
+                    for i, (data) in enumerate(valid_pbar):
+                        torch.cuda.empty_cache()
 
-                    src, trg, src_percentages, src_lengths, trg_lengths = data
-                    try:
-                        if args.cuda:
-                            src = src.cuda()
-                            trg = trg.cuda()
-                        loss, cer, num_char = self.train_one_batch(model, vocab, src, trg, src_percentages, src_lengths, trg_lengths, smoothing, loss_type)
-                        total_valid_cer += cer
-                        total_valid_char += num_char
-
-                        total_valid_loss += loss.item()
-                        valid_pbar.set_description("VALID SET {} LOSS:{:.4f} CER:{:.2f}%".format(ind,
-                            total_valid_loss/(i+1), total_valid_cer*100/total_valid_char))
-                        # valid_pbar.set_description("(Epoch {}) VALID LOSS:{:.4f} CER:{:.2f}% WER:{:.2f}%".format(
-                            # (epoch+1), total_valid_loss/(i+1), total_valid_cer*100/total_valid_char, total_valid_wer*100/total_valid_word))
-                    except:
+                        src, trg, src_percentages, src_lengths, trg_lengths = data
                         try:
-                            torch.cuda.empty_cache()
-                            src = src.cpu()
-                            trg = trg.cpu()
-                            src_splits, src_lengths_splits, trg_lengths_splits, trg_splits, trg_transcript_splits, src_percentages_splits = iter(src.split(2, dim=0)), iter(src_lengths.split(2, dim=0)), iter(trg_lengths.split(2, dim=0)), iter(trg.split(2, dim=0)), iter(trg_transcript.split(2, dim=0)), iter(src_percentages.split(2, dim=0))
-                            j = 0
-                            for src, trg, src_lengths, trg_lengths, src_percentages in zip(src_splits, trg_splits, src_lengths_splits, trg_lengths_splits, src_percentages_splits):
-                                opt.zero_grad()
-                                torch.cuda.empty_cache()
-                                if args.cuda:
-                                    src = src.cuda()
-                                    trg = trg.cuda()
+                            if args.cuda:
+                                src = src.cuda()
+                                trg = trg.cuda()
+                            loss, cer, num_char = self.train_one_batch(model, vocab, src, trg, src_percentages, src_lengths, trg_lengths, smoothing, loss_type)
+                            total_valid_cer += cer
+                            total_valid_char += num_char
 
-                                loss, cer, num_char = self.train_one_batch(model, vocab, src, trg, src_percentages, src_lengths, trg_lengths, smoothing, loss_type)
-                                total_valid_cer += cer
-                                total_valid_char += num_char
-
-                                if args.clip:
-                                    torch.nn.utils.clip_grad_norm_(model.parameters(), args.max_norm)
-                                
-                                total_valid_loss += loss.item()
-                                j += 1
-                            valid_pbar.set_description("VALID SET {} LOSS:{:.4f} CER:{:.2f}%".format(ind, total_valid_loss/(i+1), total_valid_cer*100/total_valid_char))
-
-                            logging.info("probably OOM, autosplit batch. succeeded")
-                            print("probably OOM, autosplit batch. succeeded")
+                            total_valid_loss += loss.item()
+                            valid_pbar.set_description("VALID SET {} LOSS:{:.4f} CER:{:.2f}%".format(ind,
+                                total_valid_loss/(i+1), total_valid_cer*100/total_valid_char))
+                            # valid_pbar.set_description("(Epoch {}) VALID LOSS:{:.4f} CER:{:.2f}% WER:{:.2f}%".format(
+                                # (epoch+1), total_valid_loss/(i+1), total_valid_cer*100/total_valid_char, total_valid_wer*100/total_valid_word))
                         except:
-                            logging.info("probably OOM, autosplit batch. skip batch")
-                            print("probably OOM, autosplit batch. skip batch")
-                            continue
+                            try:
+                                torch.cuda.empty_cache()
+                                src = src.cpu()
+                                trg = trg.cpu()
+                                src_splits, src_lengths_splits, trg_lengths_splits, trg_splits, trg_transcript_splits, src_percentages_splits = iter(src.split(2, dim=0)), iter(src_lengths.split(2, dim=0)), iter(trg_lengths.split(2, dim=0)), iter(trg.split(2, dim=0)), iter(trg_transcript.split(2, dim=0)), iter(src_percentages.split(2, dim=0))
+                                j = 0
+                                for src, trg, src_lengths, trg_lengths, src_percentages in zip(src_splits, trg_splits, src_lengths_splits, trg_lengths_splits, src_percentages_splits):
+                                    opt.zero_grad()
+                                    torch.cuda.empty_cache()
+                                    if args.cuda:
+                                        src = src.cuda()
+                                        trg = trg.cuda()
 
-                final_valid_loss = total_valid_loss/(len(valid_loader))
-                final_valid_cer = total_valid_cer*100/total_valid_char
+                                    loss, cer, num_char = self.train_one_batch(model, vocab, src, trg, src_percentages, src_lengths, trg_lengths, smoothing, loss_type)
+                                    total_valid_cer += cer
+                                    total_valid_char += num_char
 
-                final_valid_losses.append(final_valid_loss)
-                final_valid_cers.append(final_valid_cer)
-                print("VALID SET {} LOSS:{:.4f} CER:{:.2f}%".format(ind, final_valid_loss, final_valid_cer))
-                logging.info("VALID SET {} LOSS:{:.4f} CER:{:.2f}%".format(ind, final_valid_loss, final_valid_cer))
+                                    if args.clip:
+                                        torch.nn.utils.clip_grad_norm_(model.parameters(), args.max_norm)
+                                    
+                                    total_valid_loss += loss.item()
+                                    j += 1
+                                valid_pbar.set_description("VALID SET {} LOSS:{:.4f} CER:{:.2f}%".format(ind, total_valid_loss/(i+1), total_valid_cer*100/total_valid_char))
 
-            metrics = {}
-            avg_valid_loss = sum(final_valid_losses) / len(final_valid_losses)
-            avg_valid_cer = sum(final_valid_cers) / len(final_valid_cers)
-            metrics["avg_train_loss"] = sum(final_train_losses) / len(final_train_losses)
-            metrics["avg_valid_loss"] = sum(final_valid_losses) / len(final_valid_losses)
-            metrics["avg_train_cer"] = sum(final_train_cers) / len(final_train_cers)
-            metrics["avg_valid_cer"] = sum(final_valid_cers) / len(final_valid_cers)
-            metrics["train_loss"] = final_train_losses
-            metrics["valid_loss"] = final_valid_losses
-            metrics["train_cer"] = final_train_cers
-            metrics["valid_cer"] = final_valid_cers
-            metrics["history"] = history
-            history.append(metrics)
+                                logging.info("probably OOM, autosplit batch. succeeded")
+                                print("probably OOM, autosplit batch. succeeded")
+                            except:
+                                logging.info("probably OOM, autosplit batch. skip batch")
+                                print("probably OOM, autosplit batch. skip batch")
+                                continue
 
-            print("AVG VALID LOSS:{:.4f} AVG CER:{:.2f}%".format(sum(final_valid_losses) / len(final_valid_losses), sum(final_valid_cers) / len(final_valid_cers)))
-            logging.info("AVG VALID LOSS:{:.4f} AVG CER:{:.2f}%".format(sum(final_valid_losses) / len(final_valid_losses), sum(final_valid_cers) / len(final_valid_cers)))
+                    final_valid_loss = total_valid_loss/(len(valid_loader))
+                    final_valid_cer = total_valid_cer*100/total_valid_char
 
-            if epoch % args.save_every == 0:
-                save_model(model, vocab, (epoch+1), opt, metrics, args, best_model=False)
+                    final_valid_losses.append(final_valid_loss)
+                    final_valid_cers.append(final_valid_cer)
+                    print("VALID SET {} LOSS:{:.4f} CER:{:.2f}%".format(ind, final_valid_loss, final_valid_cer))
+                    logging.info("VALID SET {} LOSS:{:.4f} CER:{:.2f}%".format(ind, final_valid_loss, final_valid_cer))
 
-            # save the best model
-            early_stop_criteria, early_stop_val
-            if early_stop_criteria == "cer":
-                print("CRITERIA: CER")
-                if best_valid_val > avg_valid_cer:
-                    count_stop = 0
-                    best_valid_val = avg_valid_cer
-                    save_model(model, vocab, (epoch+1), opt, metrics, args, best_model=True)
+                metrics = {}
+                avg_valid_loss = sum(final_valid_losses) / len(final_valid_losses)
+                avg_valid_cer = sum(final_valid_cers) / len(final_valid_cers)
+                metrics["avg_train_loss"] = sum(final_train_losses) / len(final_train_losses)
+                metrics["avg_valid_loss"] = sum(final_valid_losses) / len(final_valid_losses)
+                metrics["avg_train_cer"] = sum(final_train_cers) / len(final_train_cers)
+                metrics["avg_valid_cer"] = sum(final_valid_cers) / len(final_valid_cers)
+                metrics["train_loss"] = final_train_losses
+                metrics["valid_loss"] = final_valid_losses
+                metrics["train_cer"] = final_train_cers
+                metrics["valid_cer"] = final_valid_cers
+                metrics["history"] = history
+                history.append(metrics)
+
+                print("AVG VALID LOSS:{:.4f} AVG CER:{:.2f}%".format(sum(final_valid_losses) / len(final_valid_losses), sum(final_valid_cers) / len(final_valid_cers)))
+                logging.info("AVG VALID LOSS:{:.4f} AVG CER:{:.2f}%".format(sum(final_valid_losses) / len(final_valid_losses), sum(final_valid_cers) / len(final_valid_cers)))
+
+                if epoch % args.save_every == 0:
+                    save_model(model, vocab, (epoch+1), opt, metrics, args, best_model=False)
+
+                # save the best model
+                early_stop_criteria, early_stop_val
+                if early_stop_criteria == "cer":
+                    print("CRITERIA: CER")
+                    if best_valid_val > avg_valid_cer:
+                        count_stop = 0
+                        best_valid_val = avg_valid_cer
+                        save_model(model, vocab, (epoch+1), opt, metrics, args, best_model=True)
+                    else:
+                        print("count_stop:", count_stop)
+                        count_stop += 1
                 else:
-                    print("count_stop:", count_stop)
-                    count_stop += 1
-            else:
-                print("CRITERIA: LOSS")
-                if best_valid_val > avg_valid_loss:
-                    count_stop = 0
-                    best_valid_val = avg_valid_loss
-                    save_model(model, vocab, (epoch+1), opt, metrics, args, best_model=True)
-                else:
-                    count_stop += 1
-                    print("count_stop:", count_stop)
+                    print("CRITERIA: LOSS")
+                    if best_valid_val > avg_valid_loss:
+                        count_stop = 0
+                        best_valid_val = avg_valid_loss
+                        save_model(model, vocab, (epoch+1), opt, metrics, args, best_model=True)
+                    else:
+                        count_stop += 1
+                        print("count_stop:", count_stop)
 
-            if count_stop >= early_stop_val:
-                logging.info("EARLY STOP")
-                print("EARLY STOP\n")
-                break
+                if count_stop >= early_stop_val:
+                    logging.info("EARLY STOP")
+                    print("EARLY STOP\n")
+                    break
 
-            if args.shuffle:
-                logging.info("SHUFFLE")
-                print("SHUFFLE\n")
-                train_sampler.shuffle(epoch)
+            # if args.shuffle:
+            #     logging.info("SHUFFLE")
+            #     print("SHUFFLE\n")

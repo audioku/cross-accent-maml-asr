@@ -223,14 +223,15 @@ class SpectrogramDataset(Dataset, SpectrogramParser):
             # Generate uniform distributions as defined in partitions
             for i, ids_list in enumerate(self.ids_list):
                 self.proba[i] = np.zeros(len(ids_list))
-                part_len = int(len(ids_list) * partitions[i])
-                part_len = 1 if part_len == 0 else part_len
-                self.proba[i][:part_len] = 1/part_len
+                self.part_len = int(len(ids_list) * partitions[i])
+                self.part_len = 1 if self.part_len == 0 else self.part_len
+                self.proba[i][:self.part_len] = 1/self.part_len
         else:
             # uniform distributions over all data
             for i, ids_list in enumerate(self.ids_list):
                 self.proba[i] = np.full(len(ids_list), 1/len(ids_list))
-        
+            self.part_len = self.max_size
+
         # if self.input_type == "bpe":
         #     self.bpeemb_list = []
         #     for i in range(len(self.lang_list)):
@@ -371,7 +372,7 @@ class SpectrogramDataset(Dataset, SpectrogramParser):
         return transcript
 
     def __len__(self):
-        return self.max_size
+        return self.part_len
 
 
 class NoiseInjection(object):
