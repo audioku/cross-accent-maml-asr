@@ -3,7 +3,7 @@
 
 <img src="img/pytorch-logo-dark.png" width="10%"> [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT) 
 
-This is the implementation of our paper accepted in Interspeech 2020 and the pre-print can be downloaded [here] (https://arxiv.org/pdf/2003.01901.pdf).
+This is the implementation of our paper accepted in Interspeech 2020 and the pre-print can be downloaded [here](https://arxiv.org/pdf/2003.01901.pdf).
 
 This code has been written using PyTorch. If you use any source codes or datasets included in this toolkit in your work, please cite the following paper.
 ```
