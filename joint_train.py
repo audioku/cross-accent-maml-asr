@@ -15,7 +15,7 @@ from torch.autograd import Variable
 from trainer.asr.joint_trainer import JointTrainer
 from utils.data import Vocab
 from utils.data_loader import SpectrogramDataset, LogFBankDataset, AudioDataLoader, BucketingSampler
-from utils.functions import load_joint_model, load_discriminator, init_transformer_model, init_discriminator_model, init_optimizer, compute_num_params, generate_labels
+from utils.functions import load_joint_model, init_transformer_model, init_optimizer, compute_num_params, generate_labels
 
 parser = argparse.ArgumentParser(description='Transformer ASR meta training')
 parser.add_argument('--model', default='TRFS', type=str, help="")
@@ -116,8 +116,6 @@ parser.add_argument('--finetune', action='store_true', help="")
 parser.add_argument('--multitask', action='store_true', help='conduct multi-task training')
 parser.add_argument('--num-class', default=10, type=int, help="number of accents in the training")
 
-# Adversarial training
-parser.add_argument('--adversarial', action='store_true', help='adversarial training')
 parser.add_argument('--beta-decay', action='store_true', help='decrease the weight of discriminator')
 parser.add_argument('--lr-disc', type=float, default=5e-6, help='learning rate for discriminator')
 
@@ -196,17 +194,9 @@ if __name__ == '__main__':
         model, vocab, opt, epoch, metrics, loaded_args = load_joint_model(args.continue_from)
         start_epoch = (epoch)  # index starts from zero
         verbose = args.verbose
-        if args.adversarial or args.multitask:
-            discriminator, opt_disc = load_discriminator(args.continue_from)
-        else:
-            discriminator = None
     else:
         if args.model == "TRFS":
             model = init_transformer_model(args, vocab, is_factorized=args.is_factorized, r=args.r)
-            if args.adversarial or args.multitask:
-                discriminator = init_discriminator_model(args)
-            else:
-                discriminator = None
         else:
             logging.info("The model is not supported, check args --h")
     
@@ -214,8 +204,6 @@ if __name__ == '__main__':
 
     if USE_CUDA:
         model = model.cuda()
-        if args.adversarial or args.multitask:
-            discriminator = discriminator.cuda()
 
     logging.info(model)
     num_epochs = args.epochs
@@ -223,4 +211,4 @@ if __name__ == '__main__':
     print("Parameters: {}(trainable), {}(non-trainable)".format(compute_num_params(model)[0], compute_num_params(model)[1]))
 
     trainer = JointTrainer()
-    trainer.train(model, vocab, train_data_list, valid_loader_list, loss_type, start_epoch, num_epochs, args, evaluate_every=args.evaluate_every, last_metrics=metrics, early_stop=args.early_stop, cpu_state_dict=args.cpu_state_dict, is_copy_grad=args.copy_grad, discriminator=discriminator)
+    trainer.train(model, vocab, train_data_list, valid_loader_list, loss_type, start_epoch, num_epochs, args, evaluate_every=args.evaluate_every, last_metrics=metrics, early_stop=args.early_stop, cpu_state_dict=args.cpu_state_dict, is_copy_grad=args.copy_grad)
