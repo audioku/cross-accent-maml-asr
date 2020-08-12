@@ -9,7 +9,7 @@ import numpy as np
 # from models.asr.transformer_cpt2 import TransformerCPT2, Encoder, Decoder
 from models.asr.transformer import Transformer
 from transformers import BertModel
-from modules import Encoder, Decoder, Discriminator
+from modules import Encoder, Decoder
 from models.asr.transformer import Transformer
 from utils.optimizer import NoamOpt, AnnealingOpt
 
