@@ -3,15 +3,19 @@
 
 <img src="img/pytorch-logo-dark.png" width="10%"> [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT) 
 
-This is the implementation of our paper accepted in Interspeech 2020 and the pre-print can be downloaded [here](https://arxiv.org/pdf/2003.01901.pdf).
+This is the implementation of our paper accepted in Interspeech 2020 and can be downloaded [here](https://www.isca-speech.org/archive_v0/Interspeech_2020/pdfs/0045.pdf).
 
 This code has been written using PyTorch. If you use any source codes or datasets included in this toolkit in your work, please cite the following paper.
 ```
-@article{winata2020learning,
-  title={Learning fast adaptation on cross-accented speech recognition},
-  author={Winata, Genta Indra and Cahyawijaya, Samuel and Liu, Zihan and Lin, Zhaojiang and Madotto, Andrea and Xu, Peng and Fung, Pascale},
-  journal={arXiv preprint arXiv:2003.01901},
-  year={2020}
+@inproceedings{winata2020crossaccent,
+  doi = {10.21437/interspeech.2020-0045},
+  url = {https://doi.org/10.21437/interspeech.2020-0045},
+  year = {2020},
+  month = oct,
+  publisher = {{ISCA}},
+  author = {Genta Indra Winata and Samuel Cahyawijaya and Zihan Liu and Zhaojiang Lin and Andrea Madotto and Peng Xu and Pascale Fung},
+  title = {Learning Fast Adaptation on Cross-Accented Speech Recognition},
+  booktitle = {Interspeech 2020}
 }
 ```
 
